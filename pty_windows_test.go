@@ -3,6 +3,7 @@
 package pty
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os/exec"
@@ -15,7 +16,7 @@ var errTimeout = errors.New("timeout")
 
 func TestStartCmdEchoReadAll(t *testing.T) {
 	cmd := exec.Command("cmd.exe", "/d", "/c", "echo pty-windows-ok")
-	pty, err := Start(cmd)
+	pty, err := Start(context.Background(), cmd)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -34,7 +35,7 @@ func TestStartCmdEchoReadAll(t *testing.T) {
 
 func TestStartCmdReadAllAfterWait(t *testing.T) {
 	cmd := exec.Command("cmd.exe", "/d", "/c", "echo pty-tail-ok")
-	pty, err := Start(cmd)
+	pty, err := Start(context.Background(), cmd)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestStartCmdReadAllAfterWait(t *testing.T) {
 
 func TestStartInteractiveCmdRoundTrip(t *testing.T) {
 	cmd := exec.Command("cmd.exe", "/d")
-	pty, err := Start(cmd)
+	pty, err := Start(context.Background(), cmd)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

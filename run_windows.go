@@ -18,25 +18,14 @@ import (
 )
 
 // Start assigns a pseudo-terminal tty to cmd, starts cmd, and returns the pty
-// master side.
-func Start(cmd *exec.Cmd) (Pty, error) {
-	return StartWithSize(cmd, nil)
-}
-
-// StartContext is like Start but kills cmd when ctx is done.
-func StartContext(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
-	return StartContextWithSize(ctx, cmd, nil)
+// master side. It kills cmd when ctx is done.
+func Start(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
+	return StartWithSize(ctx, cmd, nil)
 }
 
 // StartWithSize starts cmd attached to a pseudo terminal with the requested
-// initial size.
-func StartWithSize(cmd *exec.Cmd, size *Winsize) (Pty, error) {
-	pty, _, err := startWithSize(cmd, size)
-	return pty, err
-}
-
-// StartContextWithSize is like StartWithSize but kills cmd when ctx is done.
-func StartContextWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, error) {
+// initial size. It kills cmd when ctx is done.
+func StartWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, error) {
 	if ctx == nil {
 		panic("nil Context")
 	}

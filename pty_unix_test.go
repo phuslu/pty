@@ -16,7 +16,7 @@ import (
 
 func TestStartConnectsStandardStreamsToPTY(t *testing.T) {
 	cmd := exec.Command("/bin/sh", "-c", "test -t 0 && test -t 1 && test -t 2 && printf tty-ok")
-	pty, err := Start(cmd)
+	pty, err := Start(context.Background(), cmd)
 	requirePTY(t, err)
 	cleanupPTYCommand(t, pty, cmd)
 
@@ -30,7 +30,7 @@ func TestStartOverridesPresetStandardStreams(t *testing.T) {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 
-	pty, err := Start(cmd)
+	pty, err := Start(context.Background(), cmd)
 	requirePTY(t, err)
 	cleanupPTYCommand(t, pty, cmd)
 
@@ -38,10 +38,10 @@ func TestStartOverridesPresetStandardStreams(t *testing.T) {
 	waitForCommand(t, cmd)
 }
 
-func TestStartContextKillsCommand(t *testing.T) {
+func TestStartKillsCommandWhenContextDone(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.Command("/bin/sh", "-c", "read line")
-	pty, err := StartContext(ctx, cmd)
+	pty, err := Start(ctx, cmd)
 	requirePTY(t, err)
 	cleanupPTYCommand(t, pty, cmd)
 
@@ -55,7 +55,7 @@ func TestStartWithSizeAndSetSize(t *testing.T) {
 	}
 
 	cmd := exec.Command("/bin/sh", "-c", "stty size; read line; stty size")
-	pty, err := StartWithSize(cmd, &Winsize{Rows: 31, Cols: 97})
+	pty, err := StartWithSize(context.Background(), cmd, &Winsize{Rows: 31, Cols: 97})
 	requirePTY(t, err)
 	cleanupPTYCommand(t, pty, cmd)
 

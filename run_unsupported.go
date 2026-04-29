@@ -9,24 +9,13 @@ import (
 )
 
 // Start returns errors.ErrUnsupported on platforms without a pty backend.
-func Start(cmd *exec.Cmd) (Pty, error) {
-	return nil, errors.ErrUnsupported
-}
-
-// StartContext returns errors.ErrUnsupported on platforms without a pty backend.
-func StartContext(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
-	return StartContextWithSize(ctx, cmd, nil)
+func Start(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
+	return StartWithSize(ctx, cmd, nil)
 }
 
 // StartWithSize returns errors.ErrUnsupported on platforms without a pty
 // backend.
-func StartWithSize(cmd *exec.Cmd, size *Winsize) (Pty, error) {
-	return nil, errors.ErrUnsupported
-}
-
-// StartContextWithSize returns errors.ErrUnsupported on platforms without a pty
-// backend.
-func StartContextWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, error) {
+func StartWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, error) {
 	if ctx == nil {
 		panic("nil Context")
 	}

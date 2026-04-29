@@ -9,31 +9,14 @@ import (
 )
 
 // Start assigns a pseudo-terminal tty to cmd's standard streams, starts cmd,
-// and returns the pty master side.
-func Start(cmd *exec.Cmd) (Pty, error) {
-	return StartWithSize(cmd, nil)
-}
-
-// StartContext is like Start but kills cmd when ctx is done.
-func StartContext(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
-	return StartContextWithSize(ctx, cmd, nil)
+// and returns the pty master side. It kills cmd when ctx is done.
+func Start(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
+	return StartWithSize(ctx, cmd, nil)
 }
 
 // StartWithSize starts cmd attached to a pseudo terminal with the requested
-// initial size.
-func StartWithSize(cmd *exec.Cmd, size *Winsize) (Pty, error) {
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-	}
-	attr := *cmd.SysProcAttr
-	attr.Setsid = true
-	attr.Setctty = true
-	attr.Ctty = 0
-	return startWithAttrs(cmd, size, &attr)
-}
-
-// StartContextWithSize is like StartWithSize but kills cmd when ctx is done.
-func StartContextWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, error) {
+// initial size. It kills cmd when ctx is done.
+func StartWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, error) {
 	if ctx == nil {
 		panic("nil Context")
 	}
@@ -43,7 +26,15 @@ func StartContextWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pt
 	default:
 	}
 
-	pty, err := StartWithSize(cmd, size)
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	attr := *cmd.SysProcAttr
+	attr.Setsid = true
+	attr.Setctty = true
+	attr.Ctty = 0
+
+	pty, err := startWithAttrs(cmd, size, &attr)
 	if err != nil {
 		return nil, err
 	}
