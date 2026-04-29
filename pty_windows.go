@@ -8,6 +8,8 @@ import (
 	"syscall"
 )
 
+const maxCoord = 1<<15 - 1
+
 type windowsPty struct {
 	handle syscall.Handle
 	r      *os.File
@@ -28,6 +30,11 @@ type windowsTty struct {
 }
 
 func newPty(size *Winsize) (*windowsPty, *windowsTty, error) {
+	coord, err := defaultCoord(size)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	ptyR, consoleW, err := os.Pipe()
 	if err != nil {
 		return nil, nil, err
@@ -37,16 +44,6 @@ func newPty(size *Winsize) (*windowsPty, *windowsTty, error) {
 		_ = ptyR.Close()
 		_ = consoleW.Close()
 		return nil, nil, err
-	}
-
-	coord := coord{X: 80, Y: 30}
-	if size != nil {
-		if size.Cols != 0 {
-			coord.X = int16(size.Cols)
-		}
-		if size.Rows != 0 {
-			coord.Y = int16(size.Rows)
-		}
 	}
 
 	var handle syscall.Handle
@@ -129,8 +126,39 @@ func SetSize(pty Pty, size *Winsize) error {
 	if size == nil {
 		return nil
 	}
-	return resizePseudoConsole(syscall.Handle(pty.Fd()), coord{
+	if pty == nil {
+		return syscall.EINVAL
+	}
+	coord, err := resizeCoord(size)
+	if err != nil {
+		return err
+	}
+	return resizePseudoConsole(syscall.Handle(pty.Fd()), coord)
+}
+
+func defaultCoord(size *Winsize) (coord, error) {
+	coord := coord{X: 80, Y: 30}
+	if size == nil {
+		return coord, nil
+	}
+	if size.Cols > maxCoord || size.Rows > maxCoord {
+		return coord, syscall.EINVAL
+	}
+	if size.Cols != 0 {
+		coord.X = int16(size.Cols)
+	}
+	if size.Rows != 0 {
+		coord.Y = int16(size.Rows)
+	}
+	return coord, nil
+}
+
+func resizeCoord(size *Winsize) (coord, error) {
+	if size.Cols > maxCoord || size.Rows > maxCoord {
+		return coord{}, syscall.EINVAL
+	}
+	return coord{
 		X: int16(size.Cols),
 		Y: int16(size.Rows),
-	})
+	}, nil
 }

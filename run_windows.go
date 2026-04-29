@@ -3,11 +3,15 @@
 package pty
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"unicode/utf16"
 	"unsafe"
@@ -19,30 +23,103 @@ func Start(cmd *exec.Cmd) (Pty, error) {
 	return StartWithSize(cmd, nil)
 }
 
+// StartContext is like Start but kills cmd when ctx is done.
+func StartContext(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
+	return StartContextWithSize(ctx, cmd, nil)
+}
+
 // StartWithSize starts cmd attached to a pseudo terminal with the requested
 // initial size.
 func StartWithSize(cmd *exec.Cmd, size *Winsize) (Pty, error) {
-	pty, tty, err := newPty(size)
+	pty, _, err := startWithSize(cmd, size)
+	return pty, err
+}
+
+// StartContextWithSize is like StartWithSize but kills cmd when ctx is done.
+func StartContextWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, error) {
+	if ctx == nil {
+		panic("nil Context")
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	pty, process, err := startWithSize(cmd, size)
 	if err != nil {
 		return nil, err
 	}
-	if err := startProcess(cmd, pty, tty); err != nil {
-		_ = pty.Close()
-		_ = tty.Close()
-		return nil, err
-	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = process.terminate()
+		case <-process.done:
+		}
+	}()
 	return pty, nil
 }
 
-func startProcess(cmd *exec.Cmd, pty *windowsPty, tty *windowsTty) error {
+func startWithSize(cmd *exec.Cmd, size *Winsize) (*windowsPty, *windowsProcess, error) {
+	pty, tty, err := newPty(size)
+	if err != nil {
+		return nil, nil, err
+	}
+	process, err := startProcess(cmd, pty, tty)
+	if err != nil {
+		_ = pty.Close()
+		_ = tty.Close()
+		return nil, nil, err
+	}
+	return pty, process, nil
+}
+
+type windowsProcess struct {
+	handle syscall.Handle
+	done   chan struct{}
+
+	mu sync.Mutex
+}
+
+func newWindowsProcess(handle syscall.Handle) *windowsProcess {
+	return &windowsProcess{handle: handle, done: make(chan struct{})}
+}
+
+func (p *windowsProcess) wait() {
+	_, _ = syscall.WaitForSingleObject(p.handle, syscall.INFINITE)
+	_ = p.close()
+	close(p.done)
+}
+
+func (p *windowsProcess) close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.handle == 0 {
+		return nil
+	}
+	err := syscall.CloseHandle(p.handle)
+	p.handle = 0
+	return err
+}
+
+func (p *windowsProcess) terminate() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.handle == 0 {
+		return os.ErrProcessDone
+	}
+	return syscall.TerminateProcess(p.handle, 1)
+}
+
+func startProcess(cmd *exec.Cmd, pty *windowsPty, tty *windowsTty) (*windowsProcess, error) {
 	if cmd.Process != nil {
-		return errors.New("exec: already started")
+		return nil, errors.New("exec: already started")
 	}
 	if cmd.Err != nil {
-		return cmd.Err
+		return nil, cmd.Err
 	}
 	if cmd.Path == "" {
-		return errors.New("exec: no command")
+		return nil, errors.New("exec: no command")
 	}
 
 	sys := cmd.SysProcAttr
@@ -52,14 +129,14 @@ func startProcess(cmd *exec.Cmd, pty *windowsPty, tty *windowsTty) error {
 
 	argv0, err := lookExtensions(cmd.Path, cmd.Dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if cmd.Dir != "" && !filepath.IsAbs(argv0) {
 		argv0 = filepath.Join(cmd.Dir, argv0)
 	}
 	argv0p, err := syscall.UTF16PtrFromString(argv0)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	args := cmd.Args
@@ -74,7 +151,7 @@ func startProcess(cmd *exec.Cmd, pty *windowsPty, tty *windowsTty) error {
 	if cmdline != "" {
 		argvp, err = syscall.UTF16PtrFromString(cmdline)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -82,31 +159,50 @@ func startProcess(cmd *exec.Cmd, pty *windowsPty, tty *windowsTty) error {
 	if cmd.Dir != "" {
 		dirp, err = syscall.UTF16PtrFromString(cmd.Dir)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	envBlock, err := createEnvBlock(cmd.Environ())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	attrList, err := newProcThreadAttributeList(1)
+	inheritedHandles := inheritedHandleList(sys)
+	attrList, err := newProcThreadAttributeList(attributeCount(sys, inheritedHandles))
 	if err != nil {
-		return err
+		return nil, err
 	}
+	defer attrList.delete()
+
 	if err := attrList.update(
 		procThreadAttributePseudoConsole,
 		unsafe.Pointer(pty.handle),
 		unsafe.Sizeof(pty.handle),
 	); err != nil {
-		attrList.delete()
-		return err
+		return nil, err
+	}
+	if sys.ParentProcess != 0 {
+		if err := attrList.update(
+			procThreadAttributeParentProcess,
+			unsafe.Pointer(&sys.ParentProcess),
+			unsafe.Sizeof(sys.ParentProcess),
+		); err != nil {
+			return nil, err
+		}
+	}
+	if len(inheritedHandles) != 0 {
+		if err := attrList.update(
+			procThreadAttributeHandleList,
+			unsafe.Pointer(&inheritedHandles[0]),
+			uintptr(len(inheritedHandles))*unsafe.Sizeof(inheritedHandles[0]),
+		); err != nil {
+			return nil, err
+		}
 	}
 
 	startup := &startupInfoEx{}
 	startup.Cb = uint32(unsafe.Sizeof(*startup))
-	startup.Flags = syscall.STARTF_USESTDHANDLES
 	if sys.HideWindow {
 		startup.Flags |= syscall.STARTF_USESHOWWINDOW
 		startup.ShowWindow = syscall.SW_HIDE
@@ -114,6 +210,7 @@ func startProcess(cmd *exec.Cmd, pty *windowsPty, tty *windowsTty) error {
 	startup.ProcThreadAttributeList = attrList.data
 
 	flags := sys.CreationFlags | syscall.CREATE_UNICODE_ENVIRONMENT | extendedStartupInfoPresent
+	inheritHandles := len(inheritedHandles) != 0
 	var pi syscall.ProcessInformation
 	if sys.Token != 0 {
 		err = syscall.CreateProcessAsUser(
@@ -122,7 +219,7 @@ func startProcess(cmd *exec.Cmd, pty *windowsPty, tty *windowsTty) error {
 			argvp,
 			sys.ProcessAttributes,
 			sys.ThreadAttributes,
-			false,
+			inheritHandles,
 			flags,
 			&envBlock[0],
 			dirp,
@@ -135,7 +232,7 @@ func startProcess(cmd *exec.Cmd, pty *windowsPty, tty *windowsTty) error {
 			argvp,
 			sys.ProcessAttributes,
 			sys.ThreadAttributes,
-			false,
+			inheritHandles,
 			flags,
 			&envBlock[0],
 			dirp,
@@ -144,27 +241,51 @@ func startProcess(cmd *exec.Cmd, pty *windowsPty, tty *windowsTty) error {
 		)
 	}
 	if err != nil {
-		attrList.delete()
-		return err
+		return nil, err
 	}
 	defer syscall.CloseHandle(pi.Thread)
+	runtime.KeepAlive(inheritedHandles)
+	runtime.KeepAlive(sys)
+
+	_ = tty.Close()
 
 	process, err := os.FindProcess(int(pi.ProcessId))
 	if err != nil {
-		attrList.delete()
+		_ = syscall.TerminateProcess(pi.Process, 1)
 		_ = syscall.CloseHandle(pi.Process)
-		return err
+		return nil, err
 	}
 	cmd.Process = process
-	go func(handle syscall.Handle, attrList *procThreadAttributeListContainer) {
-		if event, err := syscall.WaitForSingleObject(handle, syscall.INFINITE); err == nil && event == syscall.WAIT_OBJECT_0 {
-			_ = pty.Close()
-			_ = tty.Close()
+	windowsProcess := newWindowsProcess(pi.Process)
+	go func() {
+		windowsProcess.wait()
+		_ = pty.closeConsole()
+	}()
+	return windowsProcess, nil
+}
+
+func attributeCount(sys *syscall.SysProcAttr, inheritedHandles []syscall.Handle) uint32 {
+	n := uint32(1)
+	if sys.ParentProcess != 0 {
+		n++
+	}
+	if len(inheritedHandles) != 0 {
+		n++
+	}
+	return n
+}
+
+func inheritedHandleList(sys *syscall.SysProcAttr) []syscall.Handle {
+	if sys.NoInheritHandles {
+		return nil
+	}
+	handles := make([]syscall.Handle, 0, len(sys.AdditionalInheritedHandles))
+	for _, handle := range sys.AdditionalInheritedHandles {
+		if handle != 0 {
+			handles = append(handles, handle)
 		}
-		attrList.delete()
-		_ = syscall.CloseHandle(handle)
-	}(pi.Process, attrList)
-	return nil
+	}
+	return handles
 }
 
 func composeCommandLine(args []string) string {
@@ -200,6 +321,11 @@ func createEnvBlock(env []string) ([]uint16, error) {
 	if len(env) == 0 {
 		return []uint16{0, 0}, nil
 	}
+	env = append([]string(nil), env...)
+	sort.SliceStable(env, func(i, j int) bool {
+		return strings.ToUpper(envKey(env[i])) < strings.ToUpper(envKey(env[j]))
+	})
+
 	var block []uint16
 	for _, kv := range env {
 		if strings.IndexByte(kv, 0) >= 0 {
@@ -210,4 +336,17 @@ func createEnvBlock(env []string) ([]uint16, error) {
 	}
 	block = append(block, 0)
 	return block, nil
+}
+
+func envKey(kv string) string {
+	i := strings.IndexByte(kv, '=')
+	if i == 0 {
+		if j := strings.IndexByte(kv[1:], '='); j >= 0 {
+			i = j + 1
+		}
+	}
+	if i < 0 {
+		return kv
+	}
+	return kv[:i]
 }

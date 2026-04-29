@@ -10,6 +10,8 @@ import (
 
 const (
 	extendedStartupInfoPresent       = 0x00080000
+	procThreadAttributeParentProcess = 0x00020000
+	procThreadAttributeHandleList    = 0x00020002
 	procThreadAttributePseudoConsole = 0x00020016
 )
 
@@ -35,6 +37,9 @@ func (c coord) pack() uintptr {
 }
 
 func createPseudoConsole(size coord, in, out syscall.Handle, flags uint32, console *syscall.Handle) error {
+	if err := procCreatePseudoConsole.Find(); err != nil {
+		return errors.Join(errors.ErrUnsupported, err)
+	}
 	r0, _, _ := procCreatePseudoConsole.Call(
 		size.pack(),
 		uintptr(in),
@@ -46,10 +51,16 @@ func createPseudoConsole(size coord, in, out syscall.Handle, flags uint32, conso
 }
 
 func closePseudoConsole(console syscall.Handle) {
+	if err := procClosePseudoConsole.Find(); err != nil {
+		return
+	}
 	procClosePseudoConsole.Call(uintptr(console))
 }
 
 func resizePseudoConsole(console syscall.Handle, size coord) error {
+	if err := procResizePseudoConsole.Find(); err != nil {
+		return errors.Join(errors.ErrUnsupported, err)
+	}
 	r0, _, _ := procResizePseudoConsole.Call(uintptr(console), size.pack())
 	return hresultError(r0)
 }

@@ -4,6 +4,7 @@ package pty
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -34,6 +35,18 @@ func TestCreateEnvBlock(t *testing.T) {
 	}
 }
 
+func TestCreateEnvBlockSortsEnvironment(t *testing.T) {
+	block, err := createEnvBlock([]string{"b=2", "A=1"})
+	if err != nil {
+		t.Fatalf("createEnvBlock: %v", err)
+	}
+	got := envBlockStrings(block)
+	want := []string{"A=1", "b=2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("env block entries = %#v, want %#v", got, want)
+	}
+}
+
 func TestCoordPack(t *testing.T) {
 	got := coord{X: 80, Y: 30}.pack()
 	want := uintptr(uint32(80) | uint32(30)<<16)
@@ -51,4 +64,20 @@ func TestHRESULTError(t *testing.T) {
 	if !errors.Is(err, syscall.Errno(5)) {
 		t.Fatalf("hresultError(0x80070005) = %v, want errno 5", err)
 	}
+}
+
+func envBlockStrings(block []uint16) []string {
+	var entries []string
+	for start := 0; start < len(block); {
+		end := start
+		for end < len(block) && block[end] != 0 {
+			end++
+		}
+		if end == start {
+			break
+		}
+		entries = append(entries, syscall.UTF16ToString(block[start:end]))
+		start = end + 1
+	}
+	return entries
 }

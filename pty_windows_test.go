@@ -4,6 +4,7 @@ package pty
 
 import (
 	"errors"
+	"io"
 	"os/exec"
 	"strings"
 	"testing"
@@ -31,6 +32,27 @@ func TestStartCmdEchoReadAll(t *testing.T) {
 	}
 }
 
+func TestStartCmdReadAllAfterWait(t *testing.T) {
+	cmd := exec.Command("cmd.exe", "/d", "/c", "echo pty-tail-ok")
+	pty, err := Start(cmd)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer pty.Close()
+
+	if err := waitTimeout(cmd, 5*time.Second); err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatalf("cmd.Wait: %v", err)
+	}
+	output, err := readAllTimeout(pty, 5*time.Second)
+	if err != nil {
+		t.Fatalf("read all output: %v; output=%q", err, output)
+	}
+	if !strings.Contains(output, "pty-tail-ok") {
+		t.Fatalf("output %q does not contain pty-tail-ok", output)
+	}
+}
+
 func TestStartInteractiveCmdRoundTrip(t *testing.T) {
 	cmd := exec.Command("cmd.exe", "/d")
 	pty, err := Start(cmd)
@@ -51,6 +73,24 @@ func TestStartInteractiveCmdRoundTrip(t *testing.T) {
 	if err := waitTimeout(cmd, 5*time.Second); err != nil {
 		_ = cmd.Process.Kill()
 		t.Fatalf("cmd.Wait: %v", err)
+	}
+}
+
+func readAllTimeout(pty Pty, timeout time.Duration) (string, error) {
+	type result struct {
+		output string
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		output, err := io.ReadAll(pty)
+		done <- result{output: string(output), err: err}
+	}()
+	select {
+	case res := <-done:
+		return res.output, res.err
+	case <-time.After(timeout):
+		return "", errTimeout
 	}
 }
 
