@@ -3,6 +3,7 @@
 package pty
 
 import (
+	"context"
 	"os/exec"
 	"syscall"
 )
@@ -11,6 +12,11 @@ import (
 // and returns the pty master side.
 func Start(cmd *exec.Cmd) (Pty, error) {
 	return StartWithSize(cmd, nil)
+}
+
+// StartContext is like Start but kills cmd when ctx is done.
+func StartContext(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
+	return StartContextWithSize(ctx, cmd, nil)
 }
 
 // StartWithSize starts cmd attached to a pseudo terminal with the requested
@@ -22,7 +28,32 @@ func StartWithSize(cmd *exec.Cmd, size *Winsize) (Pty, error) {
 	attr := *cmd.SysProcAttr
 	attr.Setsid = true
 	attr.Setctty = true
+	attr.Ctty = 0
 	return startWithAttrs(cmd, size, &attr)
+}
+
+// StartContextWithSize is like StartWithSize but kills cmd when ctx is done.
+func StartContextWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, error) {
+	if ctx == nil {
+		panic("nil Context")
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	pty, err := StartWithSize(cmd, size)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		<-ctx.Done()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
+	return pty, nil
 }
 
 func startWithAttrs(cmd *exec.Cmd, size *Winsize, attr *syscall.SysProcAttr) (Pty, error) {
@@ -38,15 +69,9 @@ func startWithAttrs(cmd *exec.Cmd, size *Winsize, attr *syscall.SysProcAttr) (Pt
 			return nil, err
 		}
 	}
-	if cmd.Stdin == nil {
-		cmd.Stdin = tty
-	}
-	if cmd.Stdout == nil {
-		cmd.Stdout = tty
-	}
-	if cmd.Stderr == nil {
-		cmd.Stderr = tty
-	}
+	cmd.Stdin = tty
+	cmd.Stdout = tty
+	cmd.Stderr = tty
 	cmd.SysProcAttr = attr
 
 	if err := cmd.Start(); err != nil {

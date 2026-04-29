@@ -4,6 +4,7 @@ package pty
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os/exec"
@@ -21,6 +22,31 @@ func TestStartConnectsStandardStreamsToPTY(t *testing.T) {
 
 	readUntil(t, pty, "tty-ok")
 	waitForCommand(t, cmd)
+}
+
+func TestStartOverridesPresetStandardStreams(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "test -t 0 && test -t 1 && test -t 2 && printf tty-override-ok")
+	cmd.Stdin = strings.NewReader("not a tty")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+
+	pty, err := Start(cmd)
+	requirePTY(t, err)
+	cleanupPTYCommand(t, pty, cmd)
+
+	readUntil(t, pty, "tty-override-ok")
+	waitForCommand(t, cmd)
+}
+
+func TestStartContextKillsCommand(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.Command("/bin/sh", "-c", "read line")
+	pty, err := StartContext(ctx, cmd)
+	requirePTY(t, err)
+	cleanupPTYCommand(t, pty, cmd)
+
+	cancel()
+	waitForCommandError(t, cmd)
 }
 
 func TestStartWithSizeAndSetSize(t *testing.T) {
@@ -44,6 +70,12 @@ func TestStartWithSizeAndSetSize(t *testing.T) {
 
 	readUntil(t, pty, "33 101")
 	waitForCommand(t, cmd)
+}
+
+func TestSetSizeNilPTY(t *testing.T) {
+	if err := SetSize(nil, &Winsize{Rows: 1, Cols: 1}); !errors.Is(err, syscall.EINVAL) {
+		t.Fatalf("SetSize error = %v, want syscall.EINVAL", err)
+	}
 }
 
 func requirePTY(t *testing.T, err error) {
@@ -114,6 +146,24 @@ func readUntil(t *testing.T, r io.Reader, needle string) string {
 func waitForCommand(t *testing.T, cmd *exec.Cmd) {
 	t.Helper()
 
+	err := waitForCommandResult(t, cmd)
+	if err != nil {
+		t.Fatalf("command wait: %v", err)
+	}
+}
+
+func waitForCommandError(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+
+	err := waitForCommandResult(t, cmd)
+	if err == nil {
+		t.Fatal("command wait succeeded, want error")
+	}
+}
+
+func waitForCommandResult(t *testing.T, cmd *exec.Cmd) error {
+	t.Helper()
+
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
@@ -121,12 +171,11 @@ func waitForCommand(t *testing.T, cmd *exec.Cmd) {
 
 	select {
 	case err := <-done:
-		if err != nil {
-			t.Fatalf("command wait: %v", err)
-		}
+		return err
 	case <-time.After(3 * time.Second):
 		_ = cmd.Process.Kill()
 		err := <-done
 		t.Fatalf("timeout waiting for command; after kill: %v", err)
+		return nil
 	}
 }

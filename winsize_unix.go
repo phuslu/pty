@@ -12,6 +12,9 @@ func SetSize(pty Pty, size *Winsize) error {
 	if size == nil {
 		return nil
 	}
+	if pty == nil {
+		return syscall.EINVAL
+	}
 	ws := winsize{
 		row:    size.Rows,
 		col:    size.Cols,
