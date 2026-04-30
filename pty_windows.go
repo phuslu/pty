@@ -192,7 +192,7 @@ func (p *windowsPty) Close() error {
 
 func (p *windowsPty) closeConsole() error {
 	p.consoleOnce.Do(func() {
-		closePseudoConsole(p.handle)
+		p.consoleErr = closePseudoConsole(p.handle)
 	})
 	return p.consoleErr
 }

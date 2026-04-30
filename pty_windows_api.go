@@ -50,11 +50,13 @@ func createPseudoConsole(size coord, in, out syscall.Handle, flags uint32, conso
 	return hresultError(r0)
 }
 
-func closePseudoConsole(console syscall.Handle) {
+func closePseudoConsole(console syscall.Handle) error {
 	if err := procClosePseudoConsole.Find(); err != nil {
-		return
+		return errors.Join(errors.ErrUnsupported, err)
 	}
+	// ClosePseudoConsole is a void API; there is no HRESULT to inspect here.
 	procClosePseudoConsole.Call(uintptr(console))
+	return nil
 }
 
 func resizePseudoConsole(console syscall.Handle, size coord) error {

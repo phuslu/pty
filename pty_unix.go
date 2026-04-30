@@ -61,12 +61,11 @@ func StartWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, erro
 	if err != nil {
 		return nil, err
 	}
-	go func() {
-		<-ctx.Done()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-	}()
+	if process := cmd.Process; ctx.Done() != nil && process != nil {
+		context.AfterFunc(ctx, func() {
+			_ = process.Kill()
+		})
+	}
 	return pty, nil
 }
 
