@@ -1,4 +1,4 @@
-//go:build linux || darwin
+//go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd
 
 package pty
 
@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -18,6 +19,16 @@ const (
 	darwinTIOCPTYGNAME = 0x40807453
 	darwinTIOCPTYGRANT = 0x20007454
 	darwinTIOCPTYUNLK  = 0x20007452
+
+	dragonflySpecNameLen  = 0x3f
+	dragonflyTIOCPTMASTER = 0x20007455
+
+	freebsdTIOCGPTN = 0x4004740f
+
+	netbsdTIOCPTMGET    = 0x40287446
+	netbsdTIOCPTMGETArm = 0x48087446
+
+	openbsdPTMGET = 0x40287401
 )
 
 // Start assigns a pseudo-terminal tty to cmd's standard streams, starts cmd,
@@ -122,6 +133,14 @@ func open() (pty, tty *os.File, err error) {
 		return openLinux()
 	case "darwin":
 		return openDarwin()
+	case "dragonfly":
+		return openDragonFly()
+	case "freebsd":
+		return openFreeBSD()
+	case "netbsd":
+		return openNetBSD()
+	case "openbsd":
+		return openOpenBSD()
 	default:
 		return nil, nil, errors.ErrUnsupported
 	}
@@ -207,10 +226,168 @@ func ptsname(file *os.File) (string, error) {
 	if err := ioctl(file.Fd(), darwinTIOCPTYGNAME, uintptr(unsafe.Pointer(&name[0]))); err != nil {
 		return "", err
 	}
-	for i, c := range name {
-		if c == 0 {
-			return string(name[:i]), nil
-		}
+	if name, ok := stringFromNul(name[:]); ok {
+		return name, nil
 	}
 	return "", errors.New("pty name is not NUL-terminated")
+}
+
+func openDragonFly() (pty, tty *os.File, err error) {
+	ptmx, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = ptmx.Close()
+		}
+	}()
+
+	name, err := ptsnameDragonFly(ptmx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tty, err = os.OpenFile(name, os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ptmx, tty, nil
+}
+
+func ptsnameDragonFly(file *os.File) (string, error) {
+	if err := ioctl(file.Fd(), dragonflyTIOCPTMASTER, 0); err != nil {
+		return "", err
+	}
+
+	var name [dragonflySpecNameLen]byte
+	arg := dragonflyFiodgnameArg{
+		name: (*byte)(unsafe.Pointer(&name[0])),
+		len:  dragonflySpecNameLen,
+	}
+	if err := ioctl(file.Fd(), iow('f', 120, unsafe.Sizeof(arg)), uintptr(unsafe.Pointer(&arg))); err != nil {
+		return "", err
+	}
+	if name, ok := stringFromNul(name[:]); ok {
+		return strings.Replace("/dev/"+name, "ptm", "pts", 1), nil
+	}
+	return "", errors.New("pty name is not NUL-terminated")
+}
+
+type dragonflyFiodgnameArg struct {
+	name *byte
+	len  uint32
+	pad  [4]byte
+}
+
+func openFreeBSD() (pty, tty *os.File, err error) {
+	fd, err := freebsdPosixOpenpt(syscall.O_RDWR | syscall.O_CLOEXEC)
+	if err != nil {
+		return nil, nil, err
+	}
+	ptmx := os.NewFile(uintptr(fd), "/dev/ptmx")
+	defer func() {
+		if err != nil {
+			_ = ptmx.Close()
+		}
+	}()
+
+	var n uint32
+	if err := ioctl(ptmx.Fd(), freebsdTIOCGPTN, uintptr(unsafe.Pointer(&n))); err != nil {
+		return nil, nil, err
+	}
+
+	tty, err = os.OpenFile("/dev/pts/"+strconv.Itoa(int(n)), os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ptmx, tty, nil
+}
+
+func freebsdPosixOpenpt(flag int) (int, error) {
+	fd, _, errno := syscall.Syscall(504, uintptr(flag), 0, 0)
+	if errno != 0 {
+		return 0, errno
+	}
+	return int(fd), nil
+}
+
+func iow(group byte, num byte, size uintptr) uintptr {
+	return 0x80000000 | (size << 16) | uintptr(group)<<8 | uintptr(num)
+}
+
+func openNetBSD() (pty, tty *os.File, err error) {
+	ptm, err := os.OpenFile("/dev/ptm", os.O_RDWR|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer ptm.Close()
+
+	ptmget := ptmgetNetBSD{cfd: -1, sfd: -1}
+	if err := ioctl(ptm.Fd(), netbsdTIOCPTMGETValue(), uintptr(unsafe.Pointer(&ptmget))); err != nil {
+		closePtmget(ptmget.cfd, ptmget.sfd)
+		return nil, nil, err
+	}
+	return fileFromPtmget(ptmget.cfd, ptmget.cn[:], "pty"), fileFromPtmget(ptmget.sfd, ptmget.sn[:], "tty"), nil
+}
+
+func netbsdTIOCPTMGETValue() uintptr {
+	if runtime.GOARCH == "arm" {
+		return netbsdTIOCPTMGETArm
+	}
+	return netbsdTIOCPTMGET
+}
+
+func openOpenBSD() (pty, tty *os.File, err error) {
+	ptm, err := os.OpenFile("/dev/ptm", os.O_RDWR|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer ptm.Close()
+
+	ptmget := ptmgetOpenBSD{cfd: -1, sfd: -1}
+	if err := ioctl(ptm.Fd(), openbsdPTMGET, uintptr(unsafe.Pointer(&ptmget))); err != nil {
+		closePtmget(ptmget.cfd, ptmget.sfd)
+		return nil, nil, err
+	}
+	return fileFromPtmget(ptmget.cfd, ptmget.cn[:], "pty"), fileFromPtmget(ptmget.sfd, ptmget.sn[:], "tty"), nil
+}
+
+type ptmgetNetBSD struct {
+	cfd int32
+	sfd int32
+	cn  [1024]byte
+	sn  [1024]byte
+}
+
+type ptmgetOpenBSD struct {
+	cfd int32
+	sfd int32
+	cn  [16]byte
+	sn  [16]byte
+}
+
+func closePtmget(fds ...int32) {
+	for _, fd := range fds {
+		if fd >= 0 {
+			_ = syscall.Close(int(fd))
+		}
+	}
+}
+
+func fileFromPtmget(fd int32, nameBuf []byte, fallback string) *os.File {
+	name, ok := stringFromNul(nameBuf)
+	if !ok {
+		name = fallback
+	}
+	return os.NewFile(uintptr(fd), name)
+}
+
+func stringFromNul(buf []byte) (string, bool) {
+	for i, c := range buf {
+		if c == 0 {
+			return string(buf[:i]), true
+		}
+	}
+	return "", false
 }
