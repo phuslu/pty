@@ -111,6 +111,23 @@ func SetSize(pty Pty, size *Winsize) error {
 	return ioctl(pty.Fd(), uintptr(syscall.TIOCSWINSZ), uintptr(unsafe.Pointer(&ws)))
 }
 
+// GetSize returns pty's current terminal window size.
+func GetSize(pty Pty) (*Winsize, error) {
+	if pty == nil {
+		return nil, syscall.EINVAL
+	}
+	var ws winsize
+	if err := ioctl(pty.Fd(), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws))); err != nil {
+		return nil, err
+	}
+	return &Winsize{
+		Rows: ws.row,
+		Cols: ws.col,
+		X:    ws.xpixel,
+		Y:    ws.ypixel,
+	}, nil
+}
+
 type winsize struct {
 	row    uint16
 	col    uint16

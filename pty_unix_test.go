@@ -59,11 +59,13 @@ func TestStartWithSizeAndSetSize(t *testing.T) {
 	requirePTY(t, err)
 	cleanupPTYCommand(t, pty, cmd)
 
+	requireSize(t, pty, 31, 97)
 	readUntil(t, pty, "31 97")
 
 	if err := SetSize(pty, &Winsize{Rows: 33, Cols: 101}); err != nil {
 		t.Fatalf("SetSize: %v", err)
 	}
+	requireSize(t, pty, 33, 101)
 	if _, err := pty.Write([]byte("\n")); err != nil {
 		t.Fatalf("write newline to pty: %v", err)
 	}
@@ -75,6 +77,25 @@ func TestStartWithSizeAndSetSize(t *testing.T) {
 func TestSetSizeNilPTY(t *testing.T) {
 	if err := SetSize(nil, &Winsize{Rows: 1, Cols: 1}); !errors.Is(err, syscall.EINVAL) {
 		t.Fatalf("SetSize error = %v, want syscall.EINVAL", err)
+	}
+}
+
+func TestGetSizeNilPTY(t *testing.T) {
+	_, err := GetSize(nil)
+	if !errors.Is(err, syscall.EINVAL) {
+		t.Fatalf("GetSize error = %v, want syscall.EINVAL", err)
+	}
+}
+
+func requireSize(t *testing.T, pty Pty, rows, cols uint16) {
+	t.Helper()
+
+	size, err := GetSize(pty)
+	if err != nil {
+		t.Fatalf("GetSize: %v", err)
+	}
+	if size.Rows != rows || size.Cols != cols {
+		t.Fatalf("GetSize = %+v, want rows=%d cols=%d", size, rows, cols)
 	}
 }
 

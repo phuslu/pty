@@ -54,5 +54,6 @@ func main() {
 
 - `Start(ctx, cmd)` starts `cmd` with stdin, stdout, and stderr connected to a PTY.
 - `StartWithSize(ctx, cmd, size)` starts `cmd` with an initial terminal size.
+- `GetSize(pty)` returns a running PTY's current terminal size. On Windows, it returns `errors.ErrUnsupported`.
 - `SetSize(pty, size)` resizes a running PTY.
 - `IsTerminal(fd)` reports whether a file descriptor, such as `os.Stdout.Fd()`, is a terminal.

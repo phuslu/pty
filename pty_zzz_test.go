@@ -23,4 +23,9 @@ func TestStartUnsupported(t *testing.T) {
 	if err := SetSize(nil, &Winsize{Rows: 1, Cols: 1}); !errors.Is(err, errors.ErrUnsupported) {
 		t.Fatalf("SetSize error = %v, want errors.ErrUnsupported", err)
 	}
+
+	_, err = GetSize(nil)
+	if !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("GetSize error = %v, want errors.ErrUnsupported", err)
+	}
 }

@@ -228,6 +228,12 @@ func SetSize(pty Pty, size *Winsize) error {
 	return resizePseudoConsole(syscall.Handle(pty.Fd()), coord)
 }
 
+// GetSize returns errors.ErrUnsupported because Windows ConPTY does not expose
+// a size query API.
+func GetSize(pty Pty) (*Winsize, error) {
+	return nil, errors.ErrUnsupported
+}
+
 func defaultCoord(size *Winsize) (coord, error) {
 	coord := coord{X: 80, Y: 30}
 	if size == nil {

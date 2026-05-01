@@ -77,6 +77,13 @@ func TestStartInteractiveCmdRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGetSizeUnsupported(t *testing.T) {
+	_, err := GetSize(nil)
+	if !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("GetSize error = %v, want errors.ErrUnsupported", err)
+	}
+}
+
 func readAllTimeout(pty Pty, timeout time.Duration) (string, error) {
 	type result struct {
 		output string

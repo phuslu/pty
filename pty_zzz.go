@@ -26,3 +26,8 @@ func StartWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, erro
 func SetSize(pty Pty, size *Winsize) error {
 	return errors.ErrUnsupported
 }
+
+// GetSize returns errors.ErrUnsupported on platforms without a pty backend.
+func GetSize(pty Pty) (*Winsize, error) {
+	return nil, errors.ErrUnsupported
+}
