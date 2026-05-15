@@ -57,3 +57,4 @@ func main() {
 - `GetSize(pty)` returns a running PTY's current terminal size. On Windows, it returns `errors.ErrUnsupported`.
 - `SetSize(pty, size)` resizes a running PTY.
 - `IsTerminal(fd)` reports whether a file descriptor, such as `os.Stdout.Fd()`, is a terminal.
+- `NewConsoleANSIWriter(w)` wraps a Windows console writer with ANSI output translation, and returns `w` unchanged elsewhere.
