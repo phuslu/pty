@@ -58,6 +58,6 @@ func IsTerminal(fd uintptr) bool {
 	return err == 0
 }
 
-func EnableVirtualTerminal() error {
+func EnableVirtualTerminal(stdin, stdout, stderr bool) error {
 	return nil
 }

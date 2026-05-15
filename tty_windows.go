@@ -3,7 +3,6 @@
 package pty
 
 import (
-	"cmp"
 	"syscall"
 	"unsafe"
 )
@@ -25,7 +24,7 @@ func IsTerminal(fd uintptr) bool {
 	return true
 }
 
-func EnableVirtualTerminal() error {
+func EnableVirtualTerminal(stdin, stdout, stderr bool) error {
 	const (
 		STD_INPUT_HANDLE  = ^uint32(9)  // -10
 		STD_OUTPUT_HANDLE = ^uint32(10) // -11
@@ -77,9 +76,23 @@ func EnableVirtualTerminal() error {
 		return nil
 	}
 
-	return cmp.Or(
-		enable(STD_OUTPUT_HANDLE, ENABLE_VIRTUAL_TERMINAL_PROCESSING),
-		enable(STD_ERROR_HANDLE, ENABLE_VIRTUAL_TERMINAL_PROCESSING),
-		enable(STD_INPUT_HANDLE, ENABLE_VIRTUAL_TERMINAL_INPUT),
-	)
+	if stdin {
+		if err := enable(STD_INPUT_HANDLE, ENABLE_VIRTUAL_TERMINAL_INPUT); err != nil {
+			return err
+		}
+	}
+
+	if stdout {
+		if err := enable(STD_OUTPUT_HANDLE, ENABLE_VIRTUAL_TERMINAL_PROCESSING); err != nil {
+			return err
+		}
+	}
+
+	if stderr {
+		if err := enable(STD_ERROR_HANDLE, ENABLE_VIRTUAL_TERMINAL_PROCESSING); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
