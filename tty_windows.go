@@ -3,7 +3,15 @@
 package pty
 
 import (
+	"cmp"
 	"syscall"
+	"unsafe"
+)
+
+var (
+	procGetStdHandle   = kernel32.NewProc("GetStdHandle")
+	procGetConsoleMode = kernel32.NewProc("GetConsoleMode")
+	procSetConsoleMode = kernel32.NewProc("SetConsoleMode")
 )
 
 // IsTerminal return true if the file descriptor is terminal.
@@ -15,4 +23,63 @@ func IsTerminal(fd uintptr) bool {
 	}
 
 	return true
+}
+
+func EnableVirtualTerminal() error {
+	const (
+		STD_INPUT_HANDLE  = ^uint32(9)  // -10
+		STD_OUTPUT_HANDLE = ^uint32(10) // -11
+		STD_ERROR_HANDLE  = ^uint32(11) // -12
+
+		ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+		ENABLE_VIRTUAL_TERMINAL_INPUT      = 0x0200
+	)
+
+	enable := func(stdHandle uint32, mask uint32) error {
+		r0, _, e1 := procGetStdHandle.Call(uintptr(stdHandle))
+		handle := syscall.Handle(r0)
+
+		if handle == syscall.InvalidHandle {
+			if e1 != syscall.Errno(0) {
+				return error(e1)
+			}
+			return syscall.EINVAL
+		}
+
+		var mode uint32
+
+		r1, _, e1 := procGetConsoleMode.Call(
+			uintptr(handle),
+			uintptr(unsafe.Pointer(&mode)),
+		)
+		if r1 == 0 {
+			if e1 != syscall.Errno(0) {
+				return error(e1)
+			}
+			return syscall.EINVAL
+		}
+
+		if mode&mask == mask {
+			return nil
+		}
+
+		r1, _, e1 = procSetConsoleMode.Call(
+			uintptr(handle),
+			uintptr(mode|mask),
+		)
+		if r1 == 0 {
+			if e1 != syscall.Errno(0) {
+				return error(e1)
+			}
+			return syscall.EINVAL
+		}
+
+		return nil
+	}
+
+	return cmp.Or(
+		enable(STD_OUTPUT_HANDLE, ENABLE_VIRTUAL_TERMINAL_PROCESSING),
+		enable(STD_ERROR_HANDLE, ENABLE_VIRTUAL_TERMINAL_PROCESSING),
+		enable(STD_INPUT_HANDLE, ENABLE_VIRTUAL_TERMINAL_INPUT),
+	)
 }
