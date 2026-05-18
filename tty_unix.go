@@ -17,43 +17,52 @@ func IsTerminal(fd uintptr) bool {
 	case "linux", "android":
 		switch runtime.GOARCH {
 		case "amd64":
-			trap = 16
+			trap = 16 // SYS_IOCTL
 		case "arm64":
-			trap = 29
+			trap = 29 // SYS_IOCTL
 		case "mips", "mipsle":
-			trap = 4054
+			trap = 4054 // SYS_IOCTL
 		case "mips64", "mips64le":
-			trap = 5015
+			trap = 5015 // SYS_IOCTL
 		default:
-			trap = 54
+			trap = 54 // SYS_IOCTL
 		}
 	default:
-		trap = 54
+		trap = 54 // SYS_IOCTL
 	}
 
 	var req uintptr // TIOCGETA
 	switch runtime.GOOS {
+	case "aix":
+		req = 0x5401 // TCGETS
 	case "linux", "android":
 		switch runtime.GOARCH {
 		case "ppc64", "ppc64le":
-			req = 0x402c7413
+			req = 0x402c7413 // TCGETS
 		case "mips", "mipsle", "mips64", "mips64le":
-			req = 0x540d
+			req = 0x540d // TCGETS
 		default:
-			req = 0x5401
+			req = 0x5401 // TCGETS
 		}
 	case "darwin":
 		switch runtime.GOARCH {
 		case "amd64", "arm64":
-			req = 0x40487413
+			req = 0x40487413 // TIOCGETA
 		default:
-			req = 0x402c7413
+			req = 0x402c7413 // TIOCGETA
 		}
+	case "solaris":
+		req = 0x540d // TCGETS
+	case "zos":
+		req = 3 // TCGETS
 	default:
-		req = 0x402c7413
+		req = 0x402c7413 // TIOCGETA
 	}
 
 	var termios [256]byte
+	if runtime.GOOS == "aix" || runtime.GOOS == "solaris" || runtime.GOOS == "zos" {
+		return ioctl(fd, req, uintptr(unsafe.Pointer(&termios[0]))) == nil
+	}
 	_, _, err := syscall.Syscall6(trap, fd, req, uintptr(unsafe.Pointer(&termios[0])), 0, 0, 0)
 	return err == 0
 }

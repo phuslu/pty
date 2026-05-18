@@ -1,4 +1,4 @@
-//go:build !darwin && !dragonfly && !freebsd && !linux && !netbsd && !openbsd && !windows
+//go:build !aix && !darwin && !dragonfly && !freebsd && !linux && !netbsd && !openbsd && !solaris && !windows && !zos
 
 package pty
 
@@ -30,4 +30,8 @@ func SetSize(pty Pty, size *Winsize) error {
 // GetSize returns errors.ErrUnsupported on platforms without a pty backend.
 func GetSize(pty Pty) (*Winsize, error) {
 	return nil, errors.ErrUnsupported
+}
+
+func ioctl(fd, req, arg uintptr) error {
+	return errors.ErrUnsupported
 }

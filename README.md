@@ -2,8 +2,8 @@
 
 A small Go package for starting commands attached to a pseudo terminal.
 
-It supports Unix PTYs on Linux, macOS, DragonFly BSD, FreeBSD, NetBSD, and
-OpenBSD, plus Windows ConPTY. Unsupported platforms return
+It supports Unix PTYs on AIX, Linux, macOS, DragonFly BSD, FreeBSD, NetBSD,
+OpenBSD, Solaris, and z/OS, plus Windows ConPTY. Unsupported platforms return
 `errors.ErrUnsupported`.
 
 ## Install

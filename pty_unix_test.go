@@ -1,4 +1,4 @@
-//go:build linux || darwin
+//go:build aix || darwin || linux || solaris || zos
 
 package pty
 

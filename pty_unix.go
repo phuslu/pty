@@ -1,4 +1,4 @@
-//go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd
+//go:build aix || darwin || dragonfly || freebsd || linux || netbsd || openbsd || solaris || zos
 
 package pty
 
@@ -16,6 +16,9 @@ import (
 
 // syscall only defines these ioctl constants for the target GOOS.
 const (
+	aixTIOCGWINSZ = 0x40087468
+	aixTIOCSWINSZ = ^uintptr(0x7ff78b98)
+
 	darwinTIOCPTYGNAME = 0x40807453
 	darwinTIOCPTYGRANT = 0x20007454
 	darwinTIOCPTYUNLK  = 0x20007452
@@ -25,10 +28,45 @@ const (
 
 	freebsdTIOCGPTN = 0x4004740f
 
+	linuxTIOCGWINSZ      = 0x5413
+	linuxTIOCSWINSZ      = 0x5414
+	linuxTIOCGWINSZBSD   = 0x40087468
+	linuxTIOCSWINSZBSD   = 0x80087467
+	linuxSyscallIOCTL    = 54
+	linuxSyscallIOCTL64  = 29
+	linuxSyscallIOCTLX   = 16
+	linuxSyscallIOCTLM   = 4054
+	linuxSyscallIOCTLM64 = 5015
+
 	netbsdTIOCPTMGET    = 0x40287446
 	netbsdTIOCPTMGETArm = 0x48087446
 
 	openbsdPTMGET = 0x40287401
+
+	solarisTIOCGWINSZ = 0x5468
+	solarisTIOCSWINSZ = 0x5467
+	solarisIPush      = uintptr((int32('S') << 8) | 002)
+	solarisIStr       = uintptr((int32('S') << 8) | 010)
+	solarisIFind      = uintptr((int32('S') << 8) | 013)
+	solarisISPTM      = (int32('P') << 8) | 1
+	solarisUNLKPT     = (int32('P') << 8) | 2
+	solarisOWNERPT    = (int32('P') << 8) | 5
+
+	ttyTIOCGWINSZ = 0x40087468
+	ttyTIOCSWINSZ = 0x80087467
+
+	zosSYSIOCTL       = 0x355
+	zosSYSGrantpt     = 0x37a
+	zosSYSUnlockpt    = 0x37b
+	zosSYSPosixOpenpt = 0xc66
+	zosSYSFCNTL       = 0x18c
+	zosSYSPtsnameA    = 0x718
+	zosTIOCGWINSZ     = 0x4008a368
+	zosTIOCSWINSZ     = 0x8008a367
+	zosORDWR          = 0x03
+	zosONOCTTY        = 0x20
+	zosFControlCVT    = 13
+	zosSetCVTOn       = 1
 )
 
 // Open a pty and its corresponding tty.
@@ -113,7 +151,25 @@ func SetSize(pty Pty, size *Winsize) error {
 		xpixel: size.X,
 		ypixel: size.Y,
 	}
-	return ioctl(pty.Fd(), uintptr(syscall.TIOCSWINSZ), uintptr(unsafe.Pointer(&ws)))
+	var req uintptr
+	switch runtime.GOOS {
+	case "aix":
+		req = aixTIOCSWINSZ
+	case "linux":
+		switch runtime.GOARCH {
+		case "mips", "mipsle", "mips64", "mips64le", "ppc64", "ppc64le":
+			req = linuxTIOCSWINSZBSD
+		default:
+			req = linuxTIOCSWINSZ
+		}
+	case "solaris":
+		req = solarisTIOCSWINSZ
+	case "zos":
+		req = zosTIOCSWINSZ
+	default:
+		req = ttyTIOCSWINSZ
+	}
+	return ioctl(pty.Fd(), req, uintptr(unsafe.Pointer(&ws)))
 }
 
 // GetSize returns pty's current terminal window size.
@@ -122,7 +178,25 @@ func GetSize(pty Pty) (*Winsize, error) {
 		return nil, syscall.EINVAL
 	}
 	var ws winsize
-	if err := ioctl(pty.Fd(), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws))); err != nil {
+	var req uintptr
+	switch runtime.GOOS {
+	case "aix":
+		req = aixTIOCGWINSZ
+	case "linux":
+		switch runtime.GOARCH {
+		case "mips", "mipsle", "mips64", "mips64le", "ppc64", "ppc64le":
+			req = linuxTIOCGWINSZBSD
+		default:
+			req = linuxTIOCGWINSZ
+		}
+	case "solaris":
+		req = solarisTIOCGWINSZ
+	case "zos":
+		req = zosTIOCGWINSZ
+	default:
+		req = ttyTIOCGWINSZ
+	}
+	if err := ioctl(pty.Fd(), req, uintptr(unsafe.Pointer(&ws))); err != nil {
 		return nil, err
 	}
 	return &Winsize{
@@ -140,31 +214,272 @@ type winsize struct {
 	ypixel uint16
 }
 
-func ioctl(fd, req, arg uintptr) error {
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, req, arg)
-	if errno != 0 {
-		return errno
-	}
-	return nil
-}
-
 func open() (pty, tty *os.File, err error) {
 	switch runtime.GOOS {
-	case "linux":
-		return openLinux()
+	case "aix":
+		return openAIX()
 	case "darwin":
 		return openDarwin()
 	case "dragonfly":
 		return openDragonFly()
 	case "freebsd":
 		return openFreeBSD()
+	case "linux":
+		return openLinux()
 	case "netbsd":
 		return openNetBSD()
 	case "openbsd":
 		return openOpenBSD()
+	case "solaris":
+		return openSolaris()
+	case "zos":
+		return openZOS()
 	default:
 		return nil, nil, errors.ErrUnsupported
 	}
+}
+
+func ioctl(fd, req, arg uintptr) error {
+	switch runtime.GOOS {
+	case "aix":
+		return aixIoctl(fd, req, arg)
+	case "solaris":
+		return solarisIoctl(fd, req, arg)
+	case "zos":
+		_, err := zosCall(zosSYSIOCTL, fd, req, arg)
+		return err
+	case "linux":
+		var trap uintptr
+		switch runtime.GOARCH {
+		case "amd64":
+			trap = linuxSyscallIOCTLX
+		case "arm64", "loong64", "riscv64":
+			trap = linuxSyscallIOCTL64
+		case "mips", "mipsle":
+			trap = linuxSyscallIOCTLM
+		case "mips64", "mips64le":
+			trap = linuxSyscallIOCTLM64
+		default:
+			trap = linuxSyscallIOCTL
+		}
+		_, _, errno := syscall.Syscall(trap, fd, req, arg)
+		if errno != 0 {
+			return errno
+		}
+		return nil
+	default:
+		_, _, errno := syscall.Syscall(linuxSyscallIOCTL, fd, req, arg)
+		if errno != 0 {
+			return errno
+		}
+		return nil
+	}
+}
+
+func openAIX() (pty, tty *os.File, err error) {
+	fd, err := aixOpenpt(syscall.O_RDWR | syscall.O_NOCTTY)
+	if err != nil {
+		return nil, nil, err
+	}
+	syscall.CloseOnExec(fd)
+
+	ptmx := os.NewFile(uintptr(fd), "/dev/ptmx")
+	defer func() {
+		if err != nil {
+			_ = ptmx.Close()
+		}
+	}()
+
+	if err := aixGrant(fd); err != nil {
+		return nil, nil, err
+	}
+	if err := aixUnlock(fd); err != nil {
+		return nil, nil, err
+	}
+
+	name, err := aixPts(fd)
+	if err != nil {
+		return nil, nil, err
+	}
+	tty, err = os.OpenFile(name, os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ptmx, tty, nil
+}
+
+func openSolaris() (pty, tty *os.File, err error) {
+	fd, err := syscall.Open("/dev/ptmx", syscall.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	syscall.CloseOnExec(fd)
+
+	ptmx := os.NewFile(uintptr(fd), "/dev/ptmx")
+	defer func() {
+		if err != nil {
+			_ = ptmx.Close()
+		}
+	}()
+
+	name, err := ptsnameSolaris(ptmx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := grantptSolaris(ptmx); err != nil {
+		return nil, nil, err
+	}
+	if err := unlockptSolaris(ptmx); err != nil {
+		return nil, nil, err
+	}
+
+	fd, err = syscall.Open(name, syscall.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	syscall.CloseOnExec(fd)
+
+	tty = os.NewFile(uintptr(fd), name)
+	defer func() {
+		if err != nil {
+			_ = tty.Close()
+		}
+	}()
+
+	for _, mod := range []string{"ptem", "ldterm", "ttcompat"} {
+		if err := streamsPushSolaris(tty, mod); err != nil {
+			return nil, nil, err
+		}
+	}
+	return ptmx, tty, nil
+}
+
+func ptsnameSolaris(file *os.File) (string, error) {
+	dev, err := ptsdevSolaris(file)
+	if err != nil {
+		return "", err
+	}
+	name := "/dev/pts/" + strconv.FormatInt(int64(dev), 10)
+	if err := syscall.Access(name, 0); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func ptsdevSolaris(file *os.File) (uint64, error) {
+	istr := solarisStrioctl{
+		cmd: solarisISPTM,
+	}
+	if err := ioctl(file.Fd(), solarisIStr, uintptr(unsafe.Pointer(&istr))); err != nil {
+		return 0, err
+	}
+
+	var stat syscall.Stat_t
+	if err := syscall.Fstat(int(file.Fd()), &stat); err != nil {
+		return 0, err
+	}
+	return uint64(stat.Rdev) & 0377, nil
+}
+
+func grantptSolaris(file *os.File) error {
+	if _, err := ptsdevSolaris(file); err != nil {
+		return err
+	}
+	owner := solarisPtOwn{
+		uid: int32(os.Getuid()),
+		gid: int32(os.Getgid()),
+	}
+	istr := solarisStrioctl{
+		cmd: solarisOWNERPT,
+		len: int32(unsafe.Sizeof(solarisStrioctl{})),
+		dp:  unsafe.Pointer(&owner),
+	}
+	return ioctl(file.Fd(), solarisIStr, uintptr(unsafe.Pointer(&istr)))
+}
+
+func unlockptSolaris(file *os.File) error {
+	istr := solarisStrioctl{
+		cmd: solarisUNLKPT,
+	}
+	return ioctl(file.Fd(), solarisIStr, uintptr(unsafe.Pointer(&istr)))
+}
+
+func streamsPushSolaris(file *os.File, mod string) error {
+	buf := append([]byte(mod), 0)
+	if err := ioctl(file.Fd(), solarisIFind, uintptr(unsafe.Pointer(&buf[0]))); err != nil {
+		return nil
+	}
+	return ioctl(file.Fd(), solarisIPush, uintptr(unsafe.Pointer(&buf[0])))
+}
+
+type solarisStrioctl struct {
+	cmd     int32
+	timeout int32
+	len     int32
+	dp      unsafe.Pointer
+}
+
+type solarisPtOwn struct {
+	uid int32
+	gid int32
+}
+
+func openZOS() (pty, tty *os.File, err error) {
+	r0, err := zosCall(zosSYSPosixOpenpt, zosORDWR|zosONOCTTY)
+	if err != nil {
+		return nil, nil, err
+	}
+	fd := int(r0)
+
+	cvt := zosFCnvrt{cvtcmd: zosSetCVTOn, fccsid: 1047}
+	if _, err = zosCall(zosSYSFCNTL, uintptr(fd), zosFControlCVT, uintptr(unsafe.Pointer(&cvt))); err != nil {
+		_ = syscall.Close(fd)
+		return nil, nil, err
+	}
+
+	ptmx := os.NewFile(uintptr(fd), "/dev/ptmx")
+	defer func() {
+		if err != nil {
+			_ = ptmx.Close()
+		}
+	}()
+
+	r0, err = zosCallPtr(zosSYSPtsnameA, uintptr(fd))
+	if err != nil {
+		return nil, nil, err
+	}
+	if r0 == 0 {
+		return nil, nil, syscall.EINVAL
+	}
+	name, ok := stringFromNul((*[1024]byte)(unsafe.Pointer(r0))[:])
+	if !ok {
+		return nil, nil, syscall.EINVAL
+	}
+
+	if _, err = zosCall(zosSYSGrantpt, uintptr(fd)); err != nil {
+		return nil, nil, err
+	}
+	if _, err = zosCall(zosSYSUnlockpt, uintptr(fd)); err != nil {
+		return nil, nil, err
+	}
+
+	fd, err = syscall.Open(name, zosORDWR|zosONOCTTY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err = zosCall(zosSYSFCNTL, uintptr(fd), zosFControlCVT, uintptr(unsafe.Pointer(&cvt))); err != nil {
+		_ = syscall.Close(fd)
+		return nil, nil, err
+	}
+
+	tty = os.NewFile(uintptr(fd), name)
+	return ptmx, tty, nil
+}
+
+type zosFCnvrt struct {
+	cvtcmd int32
+	pccsid int16
+	fccsid int16
 }
 
 func openLinux() (pty, tty *os.File, err error) {
@@ -179,11 +494,24 @@ func openLinux() (pty, tty *os.File, err error) {
 	}()
 
 	var n uint32
-	if err := ioctl(ptmx.Fd(), linuxTIOCGPTN(), uintptr(unsafe.Pointer(&n))); err != nil {
+	var req uintptr
+	switch runtime.GOARCH {
+	case "mips", "mipsle", "mips64", "mips64le", "ppc64", "ppc64le":
+		req = 0x40045430
+	default:
+		req = 0x80045430
+	}
+	if err := ioctl(ptmx.Fd(), req, uintptr(unsafe.Pointer(&n))); err != nil {
 		return nil, nil, err
 	}
 	var unlock int32
-	if err := ioctl(ptmx.Fd(), linuxTIOCSPTLCK(), uintptr(unsafe.Pointer(&unlock))); err != nil {
+	switch runtime.GOARCH {
+	case "mips", "mipsle", "mips64", "mips64le", "ppc64", "ppc64le":
+		req = 0x80045431
+	default:
+		req = 0x40045431
+	}
+	if err := ioctl(ptmx.Fd(), req, uintptr(unsafe.Pointer(&unlock))); err != nil {
 		return nil, nil, err
 	}
 
@@ -192,24 +520,6 @@ func openLinux() (pty, tty *os.File, err error) {
 		return nil, nil, err
 	}
 	return ptmx, tty, nil
-}
-
-func linuxTIOCGPTN() uintptr {
-	switch runtime.GOARCH {
-	case "mips", "mipsle", "mips64", "mips64le", "ppc64", "ppc64le":
-		return 0x40045430
-	default:
-		return 0x80045430
-	}
-}
-
-func linuxTIOCSPTLCK() uintptr {
-	switch runtime.GOARCH {
-	case "mips", "mipsle", "mips64", "mips64le", "ppc64", "ppc64le":
-		return 0x80045431
-	default:
-		return 0x40045431
-	}
 }
 
 func openDarwin() (pty, tty *os.File, err error) {
