@@ -31,6 +31,11 @@ const (
 	openbsdPTMGET = 0x40287401
 )
 
+// Open a pty and its corresponding tty.
+func Open() (pty, tty Pty, err error) {
+	return open()
+}
+
 // Start assigns a pseudo-terminal tty to cmd's standard streams, starts cmd,
 // and returns the pty master side. It kills cmd when ctx is done.
 func Start(ctx context.Context, cmd *exec.Cmd) (Pty, error) {

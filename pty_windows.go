@@ -38,6 +38,11 @@ type windowsTty struct {
 	closeErr  error
 }
 
+// Open a pty and its corresponding tty.
+func Open() (pty, tty Pty, err error) {
+	return newPty(nil)
+}
+
 // Start assigns a pseudo-terminal tty to cmd, starts cmd, and returns the pty
 // master side. It kills cmd when ctx is done.
 func Start(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
@@ -195,6 +200,22 @@ func (p *windowsPty) closeConsole() error {
 		p.consoleErr = closePseudoConsole(p.handle)
 	})
 	return p.consoleErr
+}
+
+func (t *windowsTty) Fd() uintptr {
+	return uintptr(^-1)
+}
+
+func (t *windowsTty) Name() string {
+	return t.r.Name()
+}
+
+func (t *windowsTty) Read(b []byte) (int, error) {
+	return 0, errors.ErrUnsupported
+}
+
+func (t *windowsTty) Write(b []byte) (int, error) {
+	return 0, errors.ErrUnsupported
 }
 
 func (t *windowsTty) Close() error {
