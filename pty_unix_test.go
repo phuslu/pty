@@ -1,4 +1,4 @@
-//go:build aix || darwin || linux || solaris || zos
+//go:build aix || darwin || dragonfly || freebsd || linux || netbsd || openbsd || solaris || zos
 
 package pty
 
@@ -36,6 +36,30 @@ func TestStartOverridesPresetStandardStreams(t *testing.T) {
 
 	readUntil(t, pty, "tty-override-ok")
 	waitForCommand(t, cmd)
+}
+
+func TestOpenReturnsUsablePTYPair(t *testing.T) {
+	ptmx, tty, err := Open()
+	requirePTY(t, err)
+	if ptmx == nil || tty == nil {
+		t.Fatalf("Open returned nil pair: pty=%v tty=%v", ptmx, tty)
+	}
+	t.Cleanup(func() {
+		_ = tty.Close()
+		_ = ptmx.Close()
+	})
+
+	if !IsTerminal(ptmx.Fd()) {
+		t.Fatal("pty master is not a terminal")
+	}
+	if !IsTerminal(tty.Fd()) {
+		t.Fatal("pty slave is not a terminal")
+	}
+
+	if err := SetSize(ptmx, &Winsize{Rows: 24, Cols: 80}); err != nil {
+		t.Fatalf("SetSize: %v", err)
+	}
+	requireSize(t, ptmx, 24, 80)
 }
 
 func TestStartKillsCommandWhenContextDone(t *testing.T) {

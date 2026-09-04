@@ -33,6 +33,67 @@ func TestStartCmdEchoReadAll(t *testing.T) {
 	}
 }
 
+func TestStartOverridesPresetStandardStreams(t *testing.T) {
+	cmd := exec.Command("cmd.exe", "/d", "/c", "echo pty-override-ok")
+	cmd.Stdin = strings.NewReader("not a tty")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+
+	pty, err := Start(context.Background(), cmd)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer pty.Close()
+
+	output, err := readUntil(pty, "pty-override-ok", 5*time.Second)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatalf("read output: %v; output=%q", err, output)
+	}
+	if err := waitTimeout(cmd, 5*time.Second); err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatalf("cmd.Wait: %v", err)
+	}
+}
+
+func TestStartKillsCommandWhenContextDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.Command("cmd.exe", "/d", "/c", "ping -n 60 127.0.0.1 > nul")
+	pty, err := Start(ctx, cmd)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer pty.Close()
+
+	cancel()
+	if err := waitTimeout(cmd, 5*time.Second); err == nil {
+		t.Fatal("command wait succeeded, want error")
+	}
+}
+
+func TestOpen(t *testing.T) {
+	pty, tty, err := Open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() {
+		_ = tty.Close()
+		_ = pty.Close()
+	}()
+
+	if pty.Fd() == 0 {
+		t.Fatal("pty handle is zero")
+	}
+
+	var buf [1]byte
+	if _, err := tty.Read(buf[:]); !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("tty.Read error = %v, want errors.ErrUnsupported", err)
+	}
+	if _, err := tty.Write(buf[:]); !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("tty.Write error = %v, want errors.ErrUnsupported", err)
+	}
+}
+
 func TestStartCmdReadAllAfterWait(t *testing.T) {
 	cmd := exec.Command("cmd.exe", "/d", "/c", "echo pty-tail-ok")
 	pty, err := Start(context.Background(), cmd)
