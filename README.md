@@ -76,3 +76,23 @@ func main() {
 On Windows, `Pty.Fd()` returns the ConPTY `HANDLE` rather than an OS file
 descriptor; it is only meaningful when passed back to this package, for
 example to `SetSize`.
+
+## Platform matrix
+
+| Capability | Unix backends¹ | Windows ConPTY | Unsupported |
+| --- | --- | --- | --- |
+| `Start` / `StartWithSize` | PTY session with slave on stdio | ConPTY attached via proc-thread attribute | `errors.ErrUnsupported` |
+| `Open` ends | Both are real files | Slave owns pipe handles only | `errors.ErrUnsupported` |
+| `Pty.Fd` | OS file descriptor | ConPTY `HANDLE` | n/a |
+| `IsTerminal` | `ioctl(TIOCGETA/TCGETS)` | `GetConsoleMode` | `false` |
+| `SetSize` | `TIOCSWINSZ` | `ResizePseudoConsole` | `errors.ErrUnsupported` |
+| `GetSize` | `TIOCGWINSZ`, live value | Last size applied by this package | `errors.ErrUnsupported` |
+| Cancel kills descendants | SIGKILL to child's process group | Best-effort job object | n/a |
+| `EnableVirtualTerminal` | No-op (VT already passes through) | Enables ConHost VT modes | No-op |
+
+¹ AIX, DragonFly BSD, FreeBSD, Linux, macOS, NetBSD, OpenBSD, Solaris, and
+z/OS.
+
+Terminal line discipline is intentionally out of scope: raw mode, echo
+control, and similar settings belong to the process that owns the terminal,
+not to the pty library.
