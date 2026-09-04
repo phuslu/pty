@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -91,6 +92,23 @@ func TestOpen(t *testing.T) {
 	}
 	if _, err := tty.Write(buf[:]); !errors.Is(err, errors.ErrUnsupported) {
 		t.Fatalf("tty.Write error = %v, want errors.ErrUnsupported", err)
+	}
+}
+
+func TestSetSizeRejectsZeroDimensions(t *testing.T) {
+	pty, tty, err := Open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() {
+		_ = tty.Close()
+		_ = pty.Close()
+	}()
+
+	for _, size := range []*Winsize{{}, {Rows: 10}, {Cols: 10}} {
+		if err := SetSize(pty, size); !errors.Is(err, syscall.EINVAL) {
+			t.Fatalf("SetSize(%+v) error = %v, want syscall.EINVAL", size, err)
+		}
 	}
 }
 

@@ -141,6 +141,47 @@ func TestSetSizeNilPTY(t *testing.T) {
 	}
 }
 
+func TestSetSizeRejectsZeroDimensions(t *testing.T) {
+	ptmx, tty, err := Open()
+	requirePTY(t, err)
+	t.Cleanup(func() {
+		_ = tty.Close()
+		_ = ptmx.Close()
+	})
+
+	for _, size := range []*Winsize{{}, {Rows: 10}, {Cols: 10}} {
+		if err := SetSize(ptmx, size); !errors.Is(err, syscall.EINVAL) {
+			t.Fatalf("SetSize(%+v) error = %v, want syscall.EINVAL", size, err)
+		}
+	}
+}
+
+func TestStartAppliesDefaultSize(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "read line")
+	pty, err := Start(context.Background(), cmd)
+	requirePTY(t, err)
+	cleanupPTYCommand(t, pty, cmd)
+
+	requireSize(t, pty, defaultRows, defaultCols)
+	if _, err := pty.Write([]byte("\n")); err != nil {
+		t.Fatalf("write newline to pty: %v", err)
+	}
+	waitForCommand(t, cmd)
+}
+
+func TestStartWithSizeFillsDefaultDimensions(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "read line")
+	pty, err := StartWithSize(context.Background(), cmd, &Winsize{Rows: 25})
+	requirePTY(t, err)
+	cleanupPTYCommand(t, pty, cmd)
+
+	requireSize(t, pty, 25, defaultCols)
+	if _, err := pty.Write([]byte("\n")); err != nil {
+		t.Fatalf("write newline to pty: %v", err)
+	}
+	waitForCommand(t, cmd)
+}
+
 func TestGetSizeNilPTY(t *testing.T) {
 	_, err := GetSize(nil)
 	if !errors.Is(err, syscall.EINVAL) {

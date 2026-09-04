@@ -8,7 +8,7 @@ import (
 	"unsafe"
 )
 
-// IsTerminal return true if the file descriptor is terminal.
+// IsTerminal reports whether the file descriptor refers to a terminal.
 func IsTerminal(fd uintptr) bool {
 	var trap uintptr // SYS_IOCTL
 	switch runtime.GOOS {
@@ -65,6 +65,9 @@ func IsTerminal(fd uintptr) bool {
 	return err == 0
 }
 
+// EnableVirtualTerminal is a no-op on Unix: terminal drivers and terminal
+// emulators already pass ANSI/VT escape sequences through unmodified. On
+// Windows it enables ConHost's VT input and output modes instead.
 func EnableVirtualTerminal(stdin, stdout, stderr bool) error {
 	return nil
 }

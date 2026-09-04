@@ -69,7 +69,9 @@ const (
 	zosSetCVTOn       = 1
 )
 
-// Open a pty and its corresponding tty.
+// Open a pty master and its corresponding slave tty. Both values are real
+// files on Unix: the slave can be attached to a command's standard streams
+// and the master is the pty device the slave talks to.
 func Open() (pty, tty Pty, err error) {
 	return open()
 }
@@ -134,11 +136,9 @@ func startWithAttrs(cmd *exec.Cmd, size *Winsize, attr *syscall.SysProcAttr) (Pt
 	}
 	defer tty.Close()
 
-	if size != nil {
-		if err := SetSize(ptmx, size); err != nil {
-			_ = ptmx.Close()
-			return nil, err
-		}
+	if err := SetSize(ptmx, normalizeWinsize(size)); err != nil {
+		_ = ptmx.Close()
+		return nil, err
 	}
 	cmd.Stdin = tty
 	cmd.Stdout = tty
@@ -152,12 +152,17 @@ func startWithAttrs(cmd *exec.Cmd, size *Winsize, attr *syscall.SysProcAttr) (Pt
 	return ptmx, nil
 }
 
-// SetSize resizes pty to size.
+// SetSize resizes pty to size. size must specify both Rows and Cols; zero
+// fields are rejected. StartWithSize fills zero fields with the default 80x30
+// size before calling SetSize.
 func SetSize(pty Pty, size *Winsize) error {
 	if size == nil {
 		return nil
 	}
 	if pty == nil {
+		return syscall.EINVAL
+	}
+	if size.Rows == 0 || size.Cols == 0 {
 		return syscall.EINVAL
 	}
 	ws := winsize{

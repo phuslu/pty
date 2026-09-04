@@ -13,7 +13,7 @@ var (
 	procSetConsoleMode = kernel32.NewProc("SetConsoleMode")
 )
 
-// IsTerminal return true if the file descriptor is terminal.
+// IsTerminal reports whether the file descriptor refers to a Windows console.
 func IsTerminal(fd uintptr) bool {
 	var mode uint32
 	err := syscall.GetConsoleMode(syscall.Handle(fd), &mode)
@@ -24,6 +24,9 @@ func IsTerminal(fd uintptr) bool {
 	return true
 }
 
+// EnableVirtualTerminal enables ConHost's ENABLE_VIRTUAL_TERMINAL_INPUT and
+// ENABLE_VIRTUAL_TERMINAL_PROCESSING modes on the current process's standard
+// handles. It returns an error if a selected handle is not a console.
 func EnableVirtualTerminal(stdin, stdout, stderr bool) error {
 	const (
 		STD_INPUT_HANDLE  = ^uint32(9)  // -10

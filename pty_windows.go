@@ -38,7 +38,10 @@ type windowsTty struct {
 	closeErr  error
 }
 
-// Open a pty and its corresponding tty.
+// Open creates a ConPTY and returns its master side together with the slave
+// pipe ends. The returned tty owns the internal console handles and cannot be
+// used as a file: Read and Write return errors.ErrUnsupported and Fd returns
+// zero. Close both returned values to release every handle.
 func Open() (pty, tty Pty, err error) {
 	return newPty(nil)
 }
@@ -184,6 +187,8 @@ func newPty(size *Winsize) (*windowsPty, *windowsTty, error) {
 }
 
 func (p *windowsPty) Fd() uintptr {
+	// This is the ConPTY HANDLE, not an OS file descriptor. It is only valid
+	// for APIs that accept a pseudo console, such as SetSize.
 	return uintptr(p.handle)
 }
 
@@ -218,7 +223,7 @@ func (p *windowsPty) closeConsole() error {
 }
 
 func (t *windowsTty) Fd() uintptr {
-	return uintptr(^-1)
+	return 0 // Not a file descriptor or console handle.
 }
 
 func (t *windowsTty) Name() string {
@@ -249,7 +254,9 @@ func firstErr(errs ...error) error {
 	return nil
 }
 
-// SetSize resizes pty to size.
+// SetSize resizes pty to size. size must specify both Rows and Cols; zero
+// fields are rejected. StartWithSize fills zero fields with the default 80x30
+// size before the console is created.
 func SetSize(pty Pty, size *Winsize) error {
 	if size == nil {
 		return nil
@@ -271,23 +278,17 @@ func GetSize(pty Pty) (*Winsize, error) {
 }
 
 func defaultCoord(size *Winsize) (coord, error) {
-	coord := coord{X: 80, Y: 30}
-	if size == nil {
-		return coord, nil
-	}
+	size = normalizeWinsize(size)
 	if size.Cols > maxCoord || size.Rows > maxCoord {
-		return coord, syscall.EINVAL
+		return coord{}, syscall.EINVAL
 	}
-	if size.Cols != 0 {
-		coord.X = int16(size.Cols)
-	}
-	if size.Rows != 0 {
-		coord.Y = int16(size.Rows)
-	}
-	return coord, nil
+	return coord{X: int16(size.Cols), Y: int16(size.Rows)}, nil
 }
 
 func resizeCoord(size *Winsize) (coord, error) {
+	if size.Rows == 0 || size.Cols == 0 {
+		return coord{}, syscall.EINVAL
+	}
 	if size.Cols > maxCoord || size.Rows > maxCoord {
 		return coord{}, syscall.EINVAL
 	}
