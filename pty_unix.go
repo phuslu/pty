@@ -75,13 +75,17 @@ func Open() (pty, tty Pty, err error) {
 }
 
 // Start assigns a pseudo-terminal tty to cmd's standard streams, starts cmd,
-// and returns the pty master side. It kills cmd when ctx is done.
+// and returns the pty master side. The child runs as the leader of its own
+// session and process group, and when ctx is done the entire process group is
+// killed so that descendants of cmd do not survive as orphans.
 func Start(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
 	return StartWithSize(ctx, cmd, nil)
 }
 
 // StartWithSize starts cmd attached to a pseudo terminal with the requested
-// initial size. It kills cmd when ctx is done.
+// initial size. The child runs as the leader of its own session and process
+// group, and when ctx is done the entire process group is killed so that
+// descendants of cmd do not survive as orphans.
 func StartWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, error) {
 	if ctx == nil {
 		panic("nil Context")
@@ -106,10 +110,21 @@ func StartWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, erro
 	}
 	if process := cmd.Process; ctx.Done() != nil && process != nil {
 		context.AfterFunc(ctx, func() {
-			_ = process.Kill()
+			_ = killProcessGroup(process)
 		})
 	}
 	return pty, nil
+}
+
+// killProcessGroup sends SIGKILL to the child's process group. startWithAttrs
+// forces Setsid, so the child's PID is also its process-group ID and a
+// negative PID reliably addresses the whole tree it leads.
+func killProcessGroup(process *os.Process) error {
+	err := syscall.Kill(-process.Pid, syscall.SIGKILL)
+	if err == syscall.ESRCH {
+		return nil
+	}
+	return err
 }
 
 func startWithAttrs(cmd *exec.Cmd, size *Winsize, attr *syscall.SysProcAttr) (Pty, error) {

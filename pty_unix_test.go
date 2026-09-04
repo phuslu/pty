@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -71,6 +72,42 @@ func TestStartKillsCommandWhenContextDone(t *testing.T) {
 
 	cancel()
 	waitForCommandError(t, cmd)
+}
+
+func TestStartKillsProcessGroupWhenContextDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30 & echo $!; wait")
+	pty, err := Start(ctx, cmd)
+	requirePTY(t, err)
+	cleanupPTYCommand(t, pty, cmd)
+
+	output := readUntil(t, pty, "\n")
+	pid, err := strconv.Atoi(strings.TrimSpace(output))
+	if err != nil {
+		t.Fatalf("background child pid %q is not a number: %v", output, err)
+	}
+
+	cancel()
+	waitForCommandError(t, cmd)
+	waitForProcessExit(t, pid)
+}
+
+func TestStartWithCanceledContextDoesNotStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	pty, err := Start(ctx, cmd)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start error = %v, want context.Canceled", err)
+	}
+	if pty != nil {
+		_ = pty.Close()
+		t.Fatal("Start returned a pty for a canceled context")
+	}
+	if cmd.Process != nil {
+		t.Fatal("Start started the command for a canceled context")
+	}
 }
 
 func TestStartWithSizeAndSetSize(t *testing.T) {
@@ -223,4 +260,18 @@ func waitForCommandResult(t *testing.T, cmd *exec.Cmd) error {
 		t.Fatalf("timeout waiting for command; after kill: %v", err)
 		return nil
 	}
+}
+
+func waitForProcessExit(t *testing.T, pid int) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		err := syscall.Kill(pid, 0)
+		if err == syscall.ESRCH {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("process %d is still alive after context cancellation", pid)
 }
