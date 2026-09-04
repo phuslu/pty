@@ -528,6 +528,7 @@ func createEnvBlock(env []string) ([]uint16, error) {
 	sort.SliceStable(env, func(i, j int) bool {
 		return strings.ToUpper(envKey(env[i])) < strings.ToUpper(envKey(env[j]))
 	})
+	env = dedupeEnvSorted(env)
 
 	var block []uint16
 	for _, kv := range env {
@@ -539,6 +540,23 @@ func createEnvBlock(env []string) ([]uint16, error) {
 	}
 	block = append(block, 0)
 	return block, nil
+}
+
+// dedupeEnvSorted removes duplicate environment keys from env, which must be
+// sorted case-insensitively and stably so equal keys stay adjacent in their
+// original order. Windows environment blocks have undefined behavior for
+// duplicate names; matching os/exec, the last value for each key wins.
+func dedupeEnvSorted(env []string) []string {
+	deduped := make([]string, 0, len(env))
+	for i := 0; i < len(env); {
+		key := strings.ToUpper(envKey(env[i]))
+		last := i
+		for i++; i < len(env) && strings.ToUpper(envKey(env[i])) == key; i++ {
+			last = i
+		}
+		deduped = append(deduped, env[last])
+	}
+	return deduped
 }
 
 func envKey(kv string) string {
