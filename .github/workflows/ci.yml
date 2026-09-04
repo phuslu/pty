@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            os: ubuntu-latest
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+          - name: macos
+            os: macos-latest
+          - name: windows-amd64
+            os: windows-latest
+          # Windows arm64 hosted runners are a public preview. Remove this
+          # row if the repository does not have access to them.
+          - name: windows-arm64
+            os: windows-11-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        if: runner.os != 'Windows'
+        run: go test -race -count=1 ./...
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        run: go test -count=1 ./...
+
+  cross:
+    name: cross-build all supported GOOS/GOARCH
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build and compile tests for every supported platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          # GOOS/GOARCH pairs that must build. z/OS is intentionally absent:
+          # upstream Go cannot target it, so it is validated with IBM's z/OS
+          # Go distribution instead.
+          targets=(
+            aix/ppc64
+            darwin/amd64
+            darwin/arm64
+            dragonfly/amd64
+            freebsd/amd64
+            freebsd/arm64
+            linux/386
+            linux/amd64
+            linux/arm
+            linux/arm64
+            linux/loong64
+            linux/mips
+            linux/mips64
+            linux/mips64le
+            linux/ppc64
+            linux/ppc64le
+            linux/riscv64
+            linux/s390x
+            netbsd/amd64
+            netbsd/arm64
+            openbsd/amd64
+            openbsd/arm64
+            solaris/amd64
+            windows/amd64
+            windows/arm64
+            # Unsupported platforms must still compile so that Start and
+            # friends can return errors.ErrUnsupported.
+            plan9/amd64
+            js/wasm
+            wasip1/wasm
+          )
+          for target in "${targets[@]}"; do
+            goos=${target%/*}
+            goarch=${target#*/}
+            echo "==> go build ${goos}/${goarch}"
+            GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go build ./...
+            # Linking a Solaris test binary requires the Solaris libc and is
+            # not possible with the upstream toolchain on Linux.
+            if [[ "${goos}" != "solaris" ]]; then
+              echo "==> go test -c ${goos}/${goarch}"
+              GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go test -c -o /dev/null ./...
+            fi
+          done

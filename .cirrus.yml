@@ -1,0 +1,14 @@
+freebsd_instance:
+  image_family: freebsd-14-3
+
+task:
+  name: FreeBSD amd64
+
+  install_script:
+    - pkg install -y go
+
+  vet_script:
+    - go vet ./...
+
+  test_script:
+    - go test -count=1 ./...
