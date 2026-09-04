@@ -8,6 +8,11 @@ import (
 	"os/exec"
 )
 
+// Open returns errors.ErrUnsupported on platforms without a pty backend.
+func Open() (pty, tty Pty, err error) {
+	return nil, nil, errors.ErrUnsupported
+}
+
 // Start returns errors.ErrUnsupported on platforms without a pty backend.
 func Start(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
 	return StartWithSize(ctx, cmd, nil)

@@ -10,7 +10,12 @@ import (
 )
 
 func TestStartUnsupported(t *testing.T) {
-	_, err := Start(context.Background(), exec.Command("test"))
+	pty, tty, err := Open()
+	if pty != nil || tty != nil || !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("Open = (%v, %v, %v), want errors.ErrUnsupported", pty, tty, err)
+	}
+
+	_, err = Start(context.Background(), exec.Command("test"))
 	if !errors.Is(err, errors.ErrUnsupported) {
 		t.Fatalf("Start error = %v, want errors.ErrUnsupported", err)
 	}
