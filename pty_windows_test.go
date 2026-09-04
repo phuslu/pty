@@ -72,6 +72,34 @@ func TestStartKillsCommandWhenContextDone(t *testing.T) {
 	}
 }
 
+func TestStartCancelRacingFastExit(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cmd := exec.Command("cmd.exe", "/d", "/c", "exit 0")
+		pty, err := Start(ctx, cmd)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+
+		cancel()
+		// The command either wins the race and exits normally, or loses it
+		// and is killed. Both are valid; the test only guards against a
+		// deadlock or a leaked watcher.
+		done := make(chan error, 1)
+		go func() {
+			done <- cmd.Wait()
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			_ = cmd.Process.Kill()
+			_ = pty.Close()
+			t.Fatal("cmd.Wait deadlocked while racing cancellation with fast exit")
+		}
+		_ = pty.Close()
+	}
+}
+
 func TestOpen(t *testing.T) {
 	pty, tty, err := Open()
 	if err != nil {

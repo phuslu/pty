@@ -110,6 +110,22 @@ func TestStartWithCanceledContextDoesNotStart(t *testing.T) {
 	}
 }
 
+func TestStartCancelRacingFastExit(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cmd := exec.Command("/bin/sh", "-c", "exit 0")
+		pty, err := Start(ctx, cmd)
+		requirePTY(t, err)
+
+		cancel()
+		// The command either wins the race and exits normally, or loses it
+		// and is killed. Both are valid; the test only guards against a
+		// deadlock or a leaked watcher.
+		_ = waitForCommandResult(t, cmd)
+		_ = pty.Close()
+	}
+}
+
 func TestStartWithSizeAndSetSize(t *testing.T) {
 	if _, err := exec.LookPath("stty"); err != nil {
 		t.Skipf("stty not available: %v", err)

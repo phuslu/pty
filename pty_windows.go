@@ -448,18 +448,14 @@ func startProcess(cmd *exec.Cmd, pty *windowsPty, tty *windowsTty) (*windowsProc
 
 	_ = tty.Close()
 
+	windowsProcess := newWindowsProcess(pi.Process, job)
 	process, err := os.FindProcess(int(pi.ProcessId))
 	if err != nil {
-		if job != 0 {
-			_ = terminateJobObject(job, 1)
-			_ = syscall.CloseHandle(job)
-		}
-		_ = syscall.TerminateProcess(pi.Process, 1)
-		_ = syscall.CloseHandle(pi.Process)
+		_ = windowsProcess.terminate()
+		_ = windowsProcess.close()
 		return nil, err
 	}
 	cmd.Process = process
-	windowsProcess := newWindowsProcess(pi.Process, job)
 	go func() {
 		windowsProcess.wait()
 		_ = pty.closeConsole()
