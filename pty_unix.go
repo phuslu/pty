@@ -444,14 +444,14 @@ func openZOS() (pty, tty *os.File, err error) {
 		}
 	}()
 
-	r0, err = zosCallPtr(zosSYSPtsnameA, uintptr(fd))
+	namePtr, err := zosCallPtr(zosSYSPtsnameA, uintptr(fd))
 	if err != nil {
 		return nil, nil, err
 	}
-	if r0 == 0 {
+	if namePtr == nil {
 		return nil, nil, syscall.EINVAL
 	}
-	name, ok := stringFromNul((*[1024]byte)(unsafe.Pointer(r0))[:])
+	name, ok := stringFromNul((*[1024]byte)(namePtr)[:])
 	if !ok {
 		return nil, nil, syscall.EINVAL
 	}

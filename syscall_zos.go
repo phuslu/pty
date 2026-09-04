@@ -6,6 +6,7 @@ import (
 	"errors"
 	"runtime"
 	"syscall"
+	"unsafe"
 )
 
 func aixIoctl(fd, req, arg uintptr) error {
@@ -40,10 +41,10 @@ func zosCall(sys uintptr, args ...uintptr) (uintptr, error) {
 	return r0, nil
 }
 
-func zosCallPtr(sys uintptr, args ...uintptr) (uintptr, error) {
+func zosCallPtr(sys uintptr, args ...uintptr) (unsafe.Pointer, error) {
 	r0, _, e1 := runtime.CallLeFuncWithPtrReturn(runtime.GetZosLibVec()+(sys<<4), args...)
 	if e1 != 0 {
-		return 0, syscall.Errno(e1)
+		return nil, syscall.Errno(e1)
 	}
-	return r0, nil
+	return unsafe.Pointer(r0), nil
 }

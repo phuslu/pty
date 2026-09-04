@@ -2,7 +2,10 @@
 
 package pty
 
-import "errors"
+import (
+	"errors"
+	"unsafe"
+)
 
 func aixIoctl(fd, req, arg uintptr) error {
 	return errors.ErrUnsupported
@@ -32,6 +35,6 @@ func zosCall(sys uintptr, args ...uintptr) (uintptr, error) {
 	return 0, errors.ErrUnsupported
 }
 
-func zosCallPtr(sys uintptr, args ...uintptr) (uintptr, error) {
-	return 0, errors.ErrUnsupported
+func zosCallPtr(sys uintptr, args ...uintptr) (unsafe.Pointer, error) {
+	return nil, errors.ErrUnsupported
 }

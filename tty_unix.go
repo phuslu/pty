@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build aix || android || darwin || dragonfly || freebsd || linux || netbsd || openbsd || solaris || zos
 
 package pty
 
@@ -12,13 +12,11 @@ import (
 func IsTerminal(fd uintptr) bool {
 	var trap uintptr // SYS_IOCTL
 	switch runtime.GOOS {
-	case "plan9", "js", "nacl":
-		return false
 	case "linux", "android":
 		switch runtime.GOARCH {
 		case "amd64":
 			trap = 16 // SYS_IOCTL
-		case "arm64":
+		case "arm64", "loong64", "riscv64":
 			trap = 29 // SYS_IOCTL
 		case "mips", "mipsle":
 			trap = 4054 // SYS_IOCTL
