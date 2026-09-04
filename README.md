@@ -62,7 +62,9 @@ func main() {
   On Unix both ends are real files; on Windows the returned slave only owns
   the internal ConPTY pipe handles (`Read`/`Write` return
   `errors.ErrUnsupported`).
-- `GetSize(pty)` returns a running PTY's current terminal size. On Windows, it returns `errors.ErrUnsupported`.
+- `GetSize(pty)` returns a running PTY's current terminal size. On Windows,
+  where ConPTY has no size query API, it returns the most recent size applied
+  through this package.
 - `SetSize(pty, size)` resizes a running PTY. Both `Rows` and `Cols` must be
   non-zero.
 - `IsTerminal(fd)` reports whether a file descriptor, such as `os.Stdout.Fd()`,

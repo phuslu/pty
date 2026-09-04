@@ -184,10 +184,38 @@ func TestStartInteractiveCmdRoundTrip(t *testing.T) {
 	}
 }
 
-func TestGetSizeUnsupported(t *testing.T) {
+func TestGetSizeNilPTY(t *testing.T) {
 	_, err := GetSize(nil)
-	if !errors.Is(err, errors.ErrUnsupported) {
-		t.Fatalf("GetSize error = %v, want errors.ErrUnsupported", err)
+	if !errors.Is(err, syscall.EINVAL) {
+		t.Fatalf("GetSize error = %v, want syscall.EINVAL", err)
+	}
+}
+
+func TestGetSizeTracksLastSize(t *testing.T) {
+	pty, tty, err := Open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() {
+		_ = tty.Close()
+		_ = pty.Close()
+	}()
+
+	if size, err := GetSize(pty); err != nil {
+		t.Fatalf("GetSize after Open: %v", err)
+	} else if size.Rows != defaultRows || size.Cols != defaultCols {
+		t.Fatalf("GetSize after Open = %+v, want %dx%d", size, defaultRows, defaultCols)
+	}
+
+	if err := SetSize(pty, &Winsize{Rows: 25, Cols: 100}); err != nil {
+		t.Fatalf("SetSize: %v", err)
+	}
+	size, err := GetSize(pty)
+	if err != nil {
+		t.Fatalf("GetSize after SetSize: %v", err)
+	}
+	if size.Rows != 25 || size.Cols != 100 {
+		t.Fatalf("GetSize after SetSize = %+v, want 25x100", size)
 	}
 }
 

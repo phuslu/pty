@@ -24,6 +24,8 @@ type windowsPty struct {
 	r      *os.File
 	w      *os.File
 
+	sizeMu      sync.Mutex
+	size        *Winsize
 	consoleOnce sync.Once
 	consoleErr  error
 	closeOnce   sync.Once
@@ -180,6 +182,7 @@ func newPty(size *Winsize) (*windowsPty, *windowsTty, error) {
 		handle: handle,
 		r:      ptyR,
 		w:      ptyW,
+		size:   normalizeWinsize(size),
 	}, &windowsTty{
 		r: consoleR,
 		w: consoleW,
@@ -268,13 +271,36 @@ func SetSize(pty Pty, size *Winsize) error {
 	if err != nil {
 		return err
 	}
-	return resizePseudoConsole(syscall.Handle(pty.Fd()), coord)
+	if err := resizePseudoConsole(syscall.Handle(pty.Fd()), coord); err != nil {
+		return err
+	}
+	if wp, ok := pty.(*windowsPty); ok {
+		wp.sizeMu.Lock()
+		wp.size = &Winsize{Rows: size.Rows, Cols: size.Cols, X: size.X, Y: size.Y}
+		wp.sizeMu.Unlock()
+	}
+	return nil
 }
 
-// GetSize returns errors.ErrUnsupported because Windows ConPTY does not expose
-// a size query API.
+// GetSize returns the most recent size applied to the ConPTY through this
+// package. Windows does not expose a size query API, so the value is a
+// client-side snapshot and may be stale if a console application resizes the
+// screen buffer itself.
 func GetSize(pty Pty) (*Winsize, error) {
-	return nil, errors.ErrUnsupported
+	if pty == nil {
+		return nil, syscall.EINVAL
+	}
+	wp, ok := pty.(*windowsPty)
+	if !ok {
+		return nil, errors.ErrUnsupported
+	}
+	wp.sizeMu.Lock()
+	defer wp.sizeMu.Unlock()
+	if wp.size == nil {
+		return nil, syscall.EINVAL
+	}
+	size := *wp.size
+	return &size, nil
 }
 
 func defaultCoord(size *Winsize) (coord, error) {
