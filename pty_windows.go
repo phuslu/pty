@@ -44,13 +44,15 @@ func Open() (pty, tty Pty, err error) {
 }
 
 // Start assigns a pseudo-terminal tty to cmd, starts cmd, and returns the pty
-// master side. It kills cmd when ctx is done.
+// master side. The child is assigned to a job object, so when ctx is done any
+// descendants of cmd that are still running are terminated together with cmd.
 func Start(ctx context.Context, cmd *exec.Cmd) (Pty, error) {
 	return StartWithSize(ctx, cmd, nil)
 }
 
 // StartWithSize starts cmd attached to a pseudo terminal with the requested
-// initial size. It kills cmd when ctx is done.
+// initial size. The child is assigned to a job object, so when ctx is done any
+// descendants of cmd that are still running are terminated together with cmd.
 func StartWithSize(ctx context.Context, cmd *exec.Cmd, size *Winsize) (Pty, error) {
 	if ctx == nil {
 		panic("nil Context")
@@ -91,13 +93,14 @@ func startWithSize(cmd *exec.Cmd, size *Winsize) (*windowsPty, *windowsProcess, 
 
 type windowsProcess struct {
 	handle syscall.Handle
+	job    syscall.Handle
 	done   chan struct{}
 
 	mu sync.Mutex
 }
 
-func newWindowsProcess(handle syscall.Handle) *windowsProcess {
-	return &windowsProcess{handle: handle, done: make(chan struct{})}
+func newWindowsProcess(handle, job syscall.Handle) *windowsProcess {
+	return &windowsProcess{handle: handle, job: job, done: make(chan struct{})}
 }
 
 func (p *windowsProcess) wait() {
@@ -109,21 +112,33 @@ func (p *windowsProcess) wait() {
 func (p *windowsProcess) close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.handle == 0 {
-		return nil
+	var err error
+	if p.job != 0 {
+		err = syscall.CloseHandle(p.job)
+		p.job = 0
 	}
-	err := syscall.CloseHandle(p.handle)
-	p.handle = 0
+	if p.handle != 0 {
+		if e := syscall.CloseHandle(p.handle); err == nil {
+			err = e
+		}
+		p.handle = 0
+	}
 	return err
 }
 
 func (p *windowsProcess) terminate() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.handle == 0 {
+	if p.handle == 0 && p.job == 0 {
 		return os.ErrProcessDone
 	}
-	return syscall.TerminateProcess(p.handle, 1)
+	if p.job != 0 {
+		_ = terminateJobObject(p.job, 1)
+	}
+	if p.handle != 0 {
+		_ = syscall.TerminateProcess(p.handle, 1)
+	}
+	return nil
 }
 
 func newPty(size *Winsize) (*windowsPty, *windowsTty, error) {
@@ -159,13 +174,13 @@ func newPty(size *Winsize) (*windowsPty, *windowsTty, error) {
 	}
 
 	return &windowsPty{
-			handle: handle,
-			r:      ptyR,
-			w:      ptyW,
-		}, &windowsTty{
-			r: consoleR,
-			w: consoleW,
-		}, nil
+		handle: handle,
+		r:      ptyR,
+		w:      ptyW,
+	}, &windowsTty{
+		r: consoleR,
+		w: consoleW,
+	}, nil
 }
 
 func (p *windowsPty) Fd() uintptr {
@@ -418,16 +433,32 @@ func startProcess(cmd *exec.Cmd, pty *windowsPty, tty *windowsTty) (*windowsProc
 	runtime.KeepAlive(inheritedHandles)
 	runtime.KeepAlive(sys)
 
+	// Assign the child to a job object so cancellation can terminate the
+	// whole tree. Assignment is best effort: processes already in a job that
+	// forbids nesting are rejected, in which case cancellation falls back to
+	// terminating the direct child only.
+	job, _ := createJobObject()
+	if job != 0 {
+		if err := assignProcessToJobObject(job, pi.Process); err != nil {
+			_ = syscall.CloseHandle(job)
+			job = 0
+		}
+	}
+
 	_ = tty.Close()
 
 	process, err := os.FindProcess(int(pi.ProcessId))
 	if err != nil {
+		if job != 0 {
+			_ = terminateJobObject(job, 1)
+			_ = syscall.CloseHandle(job)
+		}
 		_ = syscall.TerminateProcess(pi.Process, 1)
 		_ = syscall.CloseHandle(pi.Process)
 		return nil, err
 	}
 	cmd.Process = process
-	windowsProcess := newWindowsProcess(pi.Process)
+	windowsProcess := newWindowsProcess(pi.Process, job)
 	go func() {
 		windowsProcess.wait()
 		_ = pty.closeConsole()

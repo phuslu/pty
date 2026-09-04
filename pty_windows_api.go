@@ -25,6 +25,10 @@ var (
 	procLocalAlloc                        = kernel32.NewProc("LocalAlloc")
 	procResizePseudoConsole               = kernel32.NewProc("ResizePseudoConsole")
 	procUpdateProcThreadAttribute         = kernel32.NewProc("UpdateProcThreadAttribute")
+
+	procAssignProcessToJobObject = kernel32.NewProc("AssignProcessToJobObject")
+	procCreateJobObjectW         = kernel32.NewProc("CreateJobObjectW")
+	procTerminateJobObject       = kernel32.NewProc("TerminateJobObject")
 )
 
 type coord struct {
@@ -65,6 +69,30 @@ func resizePseudoConsole(console syscall.Handle, size coord) error {
 	}
 	r0, _, _ := procResizePseudoConsole.Call(uintptr(console), size.pack())
 	return hresultError(r0)
+}
+
+func createJobObject() (syscall.Handle, error) {
+	r1, _, e1 := procCreateJobObjectW.Call(0, 0)
+	if r1 == 0 {
+		return 0, errnoError(e1)
+	}
+	return syscall.Handle(r1), nil
+}
+
+func assignProcessToJobObject(job, process syscall.Handle) error {
+	r1, _, e1 := procAssignProcessToJobObject.Call(uintptr(job), uintptr(process))
+	if r1 == 0 {
+		return errnoError(e1)
+	}
+	return nil
+}
+
+func terminateJobObject(job syscall.Handle, exitCode uint32) error {
+	r1, _, e1 := procTerminateJobObject.Call(uintptr(job), uintptr(exitCode))
+	if r1 == 0 {
+		return errnoError(e1)
+	}
+	return nil
 }
 
 func hresultError(r0 uintptr) error {
